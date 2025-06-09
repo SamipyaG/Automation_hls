@@ -1,0 +1,86 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <title>HLS Automation Dashboard</title>
+  <link rel="stylesheet" href="style.css">
+  <script src="/socket.io/socket.io.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/hls.js@latest"></script>
+</head>
+<body>
+  <div class="container">
+    <header>
+      <h1>HLS Automation Dashboard</h1>
+    </header>
+    <div class="dashboard">
+      <div class="left-panel">
+        <section class="controls">
+          <label for="sourceType"><b>URL:</b></label>
+          <select id="sourceType" style="margin-bottom: 10px;">
+            <option value="source">Source</option>
+            <option value="g_mana">G_mana</option>
+          </select>
+
+          <label for="liveType"><b>Live Type:</b></label>
+          <select id="liveType" style="margin-bottom: 10px;">
+            <option value="hls">HLS</option>
+            <option value="dash">Dash</option>
+          </select>
+
+          <input id="channelNameInput" type="text" placeholder="Channel Name" style="margin-bottom: 10px;">
+          <input id="playerUrlInput" type="text" placeholder="Player URL (.m3u8)" style="margin-bottom: 10px;">
+          <button id="startBtn">Start Analysis</button>
+          <button id="stopBtn" disabled>Stop</button>
+        </section>
+        <section>
+          <h2>Manifest Table</h2>
+          <table id="manifestTable">
+            <thead>
+              <tr>
+                <th>Type</th>
+                <th>URL</th>
+                <th>Size</th>
+                <th>Time</th>
+                <th>Media Seq</th>
+                <th>DISCO</th>
+                <th>Fetched At</th>
+                <th>Headers</th>
+                <th>Manifest Content</th> <!-- Add this line -->
+              </tr>
+            </thead>
+            <tbody id="manifestTableBody"></tbody>
+          </table>
+          <div class="counters">
+            <span id="manifestCount">Manifests: 0</span>
+          </div>
+        </section>
+        <section>
+          <h2>Segment Table</h2>
+          <table id="segmentTable">
+            <thead>
+              <tr>
+                <th>Type</th>
+                <th>URL</th>
+                <th>Size</th>
+                <th>Time</th>
+                <th>Headers</th>
+              </tr>
+            </thead>
+            <tbody id="segmentTableBody"></tbody>
+          </table>
+          <div class="counters">
+            <span id="segmentCount">Segments: 0</span>
+          </div>
+        </section>
+      </div>
+      <div class="right-panel">
+        <section>
+          <h2>HLS Video Player</h2>
+          <video id="hls-video" controls width="400" style="background:#000"></video>
+        </section>
+      </div>
+    </div>
+  </div>
+  <script src="app.js"></script>
+</body>
+</html>

@@ -1,0 +1,245 @@
+/* Base Styles */
+body {
+  font-family: 'Segoe UI', Arial, sans-serif;
+  background: #f7f8fa;
+  margin: 0;
+  padding: 0;
+}
+
+.container {
+  max-width: 1200px;
+  margin: 30px auto;
+  background: #fff;
+  border-radius: 10px;
+  box-shadow: 0 2px 12px rgba(0,0,0,0.07);
+  padding: 24px 32px 32px 32px;
+}
+
+header {
+  text-align: center;
+  margin-bottom: 24px;
+}
+
+/* Dashboard Layout */
+.dashboard {
+  display: flex;
+  gap: 32px;
+}
+
+.left-panel {
+  flex: 2;
+}
+
+.right-panel {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+}
+
+/* Controls Section */
+.controls {
+  display: flex;
+  gap: 10px;
+  margin-bottom: 18px;
+}
+
+.controls input {
+  flex: 1;
+  padding: 8px 12px;
+  font-size: 1rem;
+  border: 1px solid #ccc;
+  border-radius: 4px;
+}
+
+.controls button {
+  padding: 8px 18px;
+  font-size: 1rem;
+  border: none;
+  border-radius: 4px;
+  background: #0078d4;
+  color: #fff;
+  cursor: pointer;
+  transition: background 0.2s;
+}
+
+.controls button:disabled {
+  background: #aaa;
+  cursor: not-allowed;
+}
+
+/* Table Styles */
+table {
+  width: 100%;
+  border-collapse: collapse;
+  margin-bottom: 12px;
+}
+
+th, td {
+  border: 1px solid #e0e0e0;
+  padding: 6px 8px;
+  text-align: left;
+  font-size: 14px;
+}
+
+th {
+  background: #f4f4f4;
+}
+
+/* Main Content Layout */
+main {
+  display: flex;
+  gap: 32px;
+  flex-wrap: wrap;
+}
+
+section {
+  flex: 1 1 350px;
+  background: #fafbfc;
+  border-radius: 8px;
+  padding: 18px 16px;
+  margin-bottom: 24px;
+  min-width: 320px;
+}
+
+h2, h3 {
+  margin-top: 0;
+}
+
+/* Manifest Differences */
+#manifestDiff {
+  min-height: 200px;
+  max-height: 400px;
+  overflow-y: auto;
+  font-family: 'Consolas', 'Monaco', monospace;
+  font-size: 15px;
+  line-height: 1.5;
+  white-space: pre-wrap;
+  margin: 0;
+  padding: 10px;
+  background: #fff;
+  border-radius: 8px;
+  border: 1px solid #e0e0e0;
+  margin-bottom: 16px;
+}
+
+/* Make Manifest Logs box larger and scrollable */
+#manifestLogs {
+  min-height: 200px;
+  max-height: 400px;
+  overflow-y: auto;
+  font-size: 15px;
+  padding: 10px;
+  background: #fff;
+  border-radius: 8px;
+  border: 1px solid #e0e0e0;
+  margin-bottom: 16px;
+}
+
+/* Manifest Details - New Styles */
+#manifestDetails {
+  min-height: 120px;
+  max-height: 300px;
+  overflow-y: auto;
+  font-family: 'Consolas', 'Monaco', monospace;
+  font-size: 14px;
+  line-height: 1.5;
+  white-space: pre-wrap;
+  margin: 10px 0 16px 0;
+  padding: 10px;
+  background: #f9f9f9;
+  border-radius: 8px;
+  border: 1px solid #e0e0e0;
+}
+
+/* Log Lists */
+ul.log-list {
+  list-style: none;
+  padding: 0;
+  margin: 0;
+  max-height: 200px;
+  overflow-y: auto;
+}
+
+ul.log-list li {
+  margin-bottom: 8px;
+  padding: 8px;
+  border-radius: 4px;
+  background: #e9f1fb;
+  font-size: 14px;
+  transition: background-color 0.2s;
+}
+
+ul.log-list li.info { background: #e9f1fb; }
+ul.log-list li.success { background: #e6fbe9; }
+ul.log-list li.error { background: #fbeaea; color: #b30000; }
+
+ul.log-list li:hover {
+  background-color: #f1f1f1;
+}
+
+/* Status Colors */
+.success {
+  color: #28a745;
+}
+
+.warning {
+  color: #ffc107;
+}
+
+.error {
+  color: #dc3545;
+}
+
+.info {
+  color: #17a2b8;
+}
+
+/* Header Details */
+.header-details {
+  display: none;
+  max-width: 400px;
+  word-break: break-all;
+  background: #f8f8f8;
+  border: 1px solid #ccc;
+  padding: 8px;
+  margin-top: 4px;
+  font-size: 12px;
+  z-index: 10;
+}
+
+.header-details.visible {
+  display: block;
+}
+
+.expand-btn {
+  margin-left: 8px;
+  font-size: 12px;
+  background: #eee;
+  border: none;
+  border-radius: 3px;
+  cursor: pointer;
+}
+
+/* Counters */
+.counters {
+  margin-bottom: 10px;
+  font-size: 15px;
+}
+
+/* Responsive Design */
+@media (max-width: 768px) {
+  .main {
+    grid-template-columns: 1fr;
+  }
+  
+  .controls {
+    flex-direction: column;
+    align-items: stretch;
+  }
+  
+  .section {
+    height: auto;
+    max-height: 50vh;
+  }
+}
