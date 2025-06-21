@@ -1,86 +1,116 @@
 <!DOCTYPE html>
 <html lang="en">
+
 <head>
   <meta charset="UTF-8">
   <title>HLS Automation Dashboard</title>
   <link rel="stylesheet" href="style.css">
+  <!-- Font Awesome for beautiful icons -->
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+  <!-- Load socket.io client first -->
   <script src="/socket.io/socket.io.js"></script>
+  <script>
+    // Check if socket.io is loaded
+    if (typeof io === 'undefined') {
+      console.error('Socket.IO client not loaded!');
+      document.body.innerHTML = '<div style="color: red; padding: 20px;">Error: Socket.IO client not loaded. Please check your connection and refresh the page.</div>';
+    } else {
+      console.log('Socket.IO client loaded successfully');
+    }
+  </script>
   <script src="https://cdn.jsdelivr.net/npm/hls.js@latest"></script>
 </head>
+
 <body>
   <div class="container">
     <header>
-      <h1>HLS Automation Dashboard</h1>
+      <h1><i class="fas fa-broadcast-tower"></i> HLS Automation Dashboard</h1>
+      <div id="connectionStatus" style="color: #666; font-size: 0.9em;">
+        <i class="fas fa-spinner fa-spin"></i> Connecting...
+      </div>
     </header>
     <div class="dashboard">
       <div class="left-panel">
         <section class="controls">
-          <label for="sourceType"><b>URL:</b></label>
+          <h2><i class="fas fa-cogs"></i> Configuration</h2>
+          <label for="sourceType"><i class="fas fa-server"></i> <b>Source Type:</b></label>
           <select id="sourceType" style="margin-bottom: 10px;">
             <option value="source">Source</option>
             <option value="g_mana">G_mana</option>
           </select>
 
-          <label for="liveType"><b>Live Type:</b></label>
+          <label for="liveType"><i class="fas fa-video"></i> <b>Live Type:</b></label>
           <select id="liveType" style="margin-bottom: 10px;">
             <option value="hls">HLS</option>
             <option value="dash">Dash</option>
           </select>
 
-          <input id="channelNameInput" type="text" placeholder="Channel Name" style="margin-bottom: 10px;">
-          <input id="playerUrlInput" type="text" placeholder="Player URL (.m3u8)" style="margin-bottom: 10px;">
-          <button id="startBtn">Start Analysis</button>
-          <button id="stopBtn" disabled>Stop</button>
-        </section>
-        <section>
-          <h2>Manifest Table</h2>
-          <table id="manifestTable">
-            <thead>
-              <tr>
-                <th>Type</th>
-                <th>URL</th>
-                <th>Size</th>
-                <th>Time</th>
-                <th>Media Seq</th>
-                <th>DISCO</th>
-                <th>Fetched At</th>
-                <th>Headers</th>
-                <th>Manifest Content</th> <!-- Add this line -->
-              </tr>
-            </thead>
-            <tbody id="manifestTableBody"></tbody>
-          </table>
-          <div class="counters">
-            <span id="manifestCount">Manifests: 0</span>
+          <label for="channelNameInput"><i class="fas fa-tag"></i> <b>Channel Name:</b></label>
+          <input id="channelNameInput" type="text" placeholder="Enter channel name" style="margin-bottom: 10px;">
+
+          <label for="playerUrlInput"><i class="fas fa-link"></i> <b>Player URL:</b></label>
+          <input id="playerUrlInput" type="text" placeholder="Enter HLS URL (.m3u8)" style="margin-bottom: 10px;">
+
+          <div class="button-group">
+            <button id="startBtn"><i class="fas fa-play"></i> Start Analysis</button>
+            <button id="stopBtn" disabled><i class="fas fa-stop"></i> Stop</button>
           </div>
         </section>
         <section>
-          <h2>Segment Table</h2>
-          <table id="segmentTable">
-            <thead>
-              <tr>
-                <th>Type</th>
-                <th>URL</th>
-                <th>Size</th>
-                <th>Time</th>
-                <th>Headers</th>
-              </tr>
-            </thead>
-            <tbody id="segmentTableBody"></tbody>
-          </table>
+          <h2><i class="fas fa-file-code"></i> Manifest Table</h2>
+          <div class="table-container">
+            <table id="manifestTable">
+              <thead>
+                <tr>
+                  <th><i class="fas fa-tag"></i> Type</th>
+                  <th><i class="fas fa-link"></i> URL</th>
+                  <th><i class="fas fa-weight-hanging"></i> Size</th>
+                  <th><i class="fas fa-clock"></i> Time</th>
+                  <th><i class="fas fa-list-ol"></i> Media Seq</th>
+                  <th><i class="fas fa-random"></i> DISCO</th>
+                  <th><i class="fas fa-calendar"></i> Fetched At</th>
+                  <th><i class="fas fa-headers"></i> Headers</th>
+                  <th><i class="fas fa-file-alt"></i> Content</th>
+                </tr>
+              </thead>
+              <tbody id="manifestTableBody"></tbody>
+            </table>
+          </div>
           <div class="counters">
-            <span id="segmentCount">Segments: 0</span>
+            <span id="manifestCount"><i class="fas fa-file-code"></i> Manifests: 0</span>
+          </div>
+        </section>
+        <section>
+          <h2><i class="fas fa-film"></i> Segment Table</h2>
+          <div class="table-container">
+            <table id="segmentTable">
+              <thead>
+                <tr>
+                  <th><i class="fas fa-tag"></i> Type</th>
+                  <th><i class="fas fa-link"></i> URL</th>
+                  <th><i class="fas fa-weight-hanging"></i> Size</th>
+                  <th><i class="fas fa-clock"></i> Time</th>
+                  <th><i class="fas fa-headers"></i> Headers</th>
+                </tr>
+              </thead>
+              <tbody id="segmentTableBody"></tbody>
+            </table>
+          </div>
+          <div class="counters">
+            <span id="segmentCount"><i class="fas fa-film"></i> Segments: 0</span>
           </div>
         </section>
       </div>
       <div class="right-panel">
         <section>
-          <h2>HLS Video Player</h2>
+          <h2><i class="fas fa-play-circle"></i> HLS Video Player</h2>
           <video id="hls-video" controls width="400" style="background:#000"></video>
         </section>
       </div>
     </div>
   </div>
+  <!-- Load app.js after all other scripts -->
   <script src="app.js"></script>
 </body>
+
 </html>
