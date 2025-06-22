@@ -7,7 +7,12 @@ class StreamController {
 
   async startAnalysis(playerUrl, sourceType, liveType, channelName, socket) {
     try {
-      console.log('🎯 Starting analysis for:', { playerUrl, sourceType, liveType, channelName });
+      console.log('🎯 Starting analysis for:', {
+        playerUrl,
+        sourceType,
+        liveType,
+        channelName
+      });
 
       // Check if analysis is already running for this socket
       if (this.activeStreams.has(socket.id)) {
@@ -61,24 +66,6 @@ class StreamController {
 
     } catch (error) {
       console.error('❌ Error stopping analysis:', error);
-      throw error;
-    }
-  }
-
-  async switchProfile(profileUrl, socket) {
-    try {
-      console.log('🔄 Switching profile to:', profileUrl);
-
-      const monitor = this.activeStreams.get(socket.id);
-      if (!monitor) {
-        throw new Error('No active analysis session found');
-      }
-
-      await hlsMonitorService.switchProfile(monitor, profileUrl);
-      console.log('✅ Profile switched successfully');
-
-    } catch (error) {
-      console.error('❌ Error switching profile:', error);
       throw error;
     }
   }

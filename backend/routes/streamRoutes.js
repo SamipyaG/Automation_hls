@@ -15,7 +15,11 @@ router.get('/status', (req, res) => {
     };
     res.json(status);
   } catch (error) {
-    res.status(500).json({ error: error.message });
+    console.error('Status endpoint error:', error);
+    res.status(500).json({
+      status: 'error',
+      message: error.message
+    });
   }
 });
 
@@ -28,7 +32,11 @@ router.get('/streams', (req, res) => {
       count: streams.length
     });
   } catch (error) {
-    res.status(500).json({ error: error.message });
+    console.error('Streams endpoint error:', error);
+    res.status(500).json({
+      status: 'error',
+      message: error.message
+    });
   }
 });
 

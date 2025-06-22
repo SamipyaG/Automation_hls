@@ -65,6 +65,7 @@ document.addEventListener('DOMContentLoaded', () => {
   const manifestCount = document.getElementById('manifestCount');
   const segmentCount = document.getElementById('segmentCount');
   const videoPlayer = document.getElementById('hls-video');
+  const manifestStatusIndicator = document.getElementById('manifestStatusIndicator');
 
   // Verify DOM elements
   console.log('DOM Elements:', {
@@ -75,7 +76,8 @@ document.addEventListener('DOMContentLoaded', () => {
     manifestCount: !!manifestCount,
     segmentCount: !!segmentCount,
     videoPlayer: !!videoPlayer,
-    connectionStatus: !!connectionStatus
+    connectionStatus: !!connectionStatus,
+    manifestStatusIndicator: !!manifestStatusIndicator
   });
 
   let manifestCountValue = 0;
@@ -116,46 +118,6 @@ document.addEventListener('DOMContentLoaded', () => {
     });
   } else {
     console.warn('HLS.js is not supported');
-  }
-
-  function createTableRow(data, isManifest = false) {
-    console.log('📋 Creating table row:', { data, isManifest });
-    const row = document.createElement('tr');
-
-    // Create cells based on whether it's a manifest or segment
-    const cells = isManifest ? [
-      data.type || 'MANIFEST',
-      data.url,
-      formatSize(data.size),
-      formatTime(data.time),
-      data.mediaSeq || '',
-      data.discontinuity ? '✓' : '',
-      formatTime(data.fetchedAt),
-      createHeaderButton(data.headers),
-      createManifestButton(data.content)
-    ] : [
-      data.type || 'SEGMENT',
-      data.url,
-      formatSize(data.size),
-      formatTime(data.time),
-      createHeaderButton(data.headers)
-    ];
-
-    cells.forEach((cellData, index) => {
-      const cell = document.createElement('td');
-      if (typeof cellData === 'string') {
-        cell.textContent = cellData;
-      } else if (cellData && typeof cellData === 'object' && cellData.nodeType) {
-        // It's a DOM node
-        cell.appendChild(cellData);
-      } else {
-        // Fallback for other types
-        cell.textContent = String(cellData || '');
-      }
-      row.appendChild(cell);
-    });
-
-    return row;
   }
 
   function formatSize(size) {
@@ -316,25 +278,6 @@ document.addEventListener('DOMContentLoaded', () => {
     return button;
   }
 
-  function updateTable(tableBody, data, isManifest = false) {
-    console.log('Updating table:', { tableBody, data, isManifest });
-    if (!tableBody) {
-      console.error('Table body element not found!');
-      return;
-    }
-
-    const row = createTableRow(data, isManifest);
-    console.log('Created row:', row);
-
-    // Keep only last 20 rows
-    while (tableBody.children.length >= 20) {
-      tableBody.removeChild(tableBody.firstChild);
-    }
-
-    tableBody.appendChild(row);
-    console.log('Row added to table. Current table length:', tableBody.children.length);
-  }
-
   function updateCounters() {
     manifestCount.textContent = `Manifests: ${manifestCountValue}`;
     segmentCount.textContent = `Segments: ${segmentCountValue}`;
@@ -393,51 +336,69 @@ document.addEventListener('DOMContentLoaded', () => {
   }
 
   // Socket event handlers
-  socket.on('manifestData', (data) => {
-    console.log('📋 Received manifest data:', data);
+  socket.on('manifest-update', (data) => {
+    console.log('📋 Received manifest-update event:', data);
     if (!data) {
       console.error('❌ Received empty manifest data');
       return;
     }
-    manifestCountValue++;
-    updateTable(manifestTableBody, data, true);
+
+    console.log('✅ Processing manifest for:', data.url);
+    console.log('📊 Manifest details:', {
+      type: data.type,
+      isNew: data.isNew,
+      mediaSequence: data.mediaSequence,
+      timestamp: data.timestamp,
+      url: data.url.split('/').pop()
+    });
+
+    // Only increment counter for new manifests, but always update table
+    if (data.isNew !== false) {
+      manifestCountValue++;
+    }
+
+    addToManifestTable(data);
     updateCounters();
 
-    // Update video player if this is a child manifest (selected profile)
-    if (data.type === 'CHILD_MANIFEST' && hls) {
+    // 🔥 NEW: Always update manifest table for continuous monitoring
+    if (manifestStatusIndicator) {
+      const now = new Date().toLocaleTimeString();
+      manifestStatusIndicator.textContent = `🔄 Live (${now})`;
+      manifestStatusIndicator.classList.remove('inactive');
+      manifestStatusIndicator.classList.add('active');
+    }
+
+    // Update video player if this is a variant manifest (selected profile)
+    if (data.type === 'variant' && hls) {
       console.log('🎥 Updating video player with selected profile:', data.url);
       currentUrl = data.url;
       hls.loadSource(data.url);
     }
   });
 
-  socket.on('segmentData', (data) => {
-    console.log('🎬 Received segment data:', data);
+  // Add a catch-all event logger for debugging
+  socket.onAny((event, ...args) => {
+    console.log(`[SOCKET DEBUG] Event: ${event}`, ...args);
+  });
+
+  // Track if any segments have been received
+  let segmentReceived = false;
+
+  socket.on('new-segment', (data) => {
+    segmentReceived = true;
+    console.log('🎬 Received new-segment event:', data);
     if (!data) {
       console.error('❌ Received empty segment data');
       return;
     }
 
-    // Only process segments that are flagged as new
-    if (data.isNew) {
-      console.log('🆕 Processing NEW segment:', data.url);
-      segmentCountValue++;
-      updateTable(segmentTableBody, data, false);
-      updateCounters();
-    } else {
-      console.log('⏭️ Skipping duplicate segment:', data.url);
-    }
-  });
+    console.log('✅ Processing segment for:', data.url);
+    segmentCountValue++;
+    addToSegmentTable(data);
+    updateCounters();
 
-  socket.on('profile-list', (profiles) => {
-    console.log('📋 Received profile list:', profiles);
-    const profileSelector = createProfileSelector(profiles);
-    const rightPanel = document.querySelector('.right-panel section');
-    const existingSelector = rightPanel.querySelector('.profile-selector');
-    if (existingSelector) {
-      existingSelector.remove();
-    }
-    rightPanel.insertBefore(profileSelector, videoPlayer);
+    // 🔥 NEW: Log segment info like developer tools
+    console.log(`📊 Segment #${data.sequence}: ${formatSize(data.size)} | Download: ${data.downloadTime}ms`);
   });
 
   socket.on('profiles-available', (profiles) => {
@@ -461,16 +422,27 @@ document.addEventListener('DOMContentLoaded', () => {
     console.log('✅ Monitor started:', data);
     startBtn.disabled = true;
     stopBtn.disabled = false;
+
+    // 🔥 NEW: Set manifest status indicator to active
+    if (manifestStatusIndicator) {
+      const now = new Date().toLocaleTimeString();
+      manifestStatusIndicator.textContent = `🔄 Live (${now})`;
+      manifestStatusIndicator.classList.remove('inactive');
+      manifestStatusIndicator.classList.add('active');
+    }
   });
 
   socket.on('monitor-stopped', (data) => {
     console.log('🛑 Monitor stopped:', data);
     startBtn.disabled = false;
     stopBtn.disabled = true;
-  });
 
-  socket.on('profile-switched', (data) => {
-    console.log('🔄 Profile switched:', data);
+    // 🔥 NEW: Set manifest status indicator to inactive
+    if (manifestStatusIndicator) {
+      manifestStatusIndicator.textContent = '⏸️ Stopped';
+      manifestStatusIndicator.classList.add('inactive');
+      manifestStatusIndicator.classList.remove('active');
+    }
   });
 
   socket.on('error', (error) => {
@@ -505,6 +477,13 @@ document.addEventListener('DOMContentLoaded', () => {
     segmentTableBody.innerHTML = '';
     updateCounters();
 
+    // 🔥 NEW: Reset manifest status indicator
+    if (manifestStatusIndicator) {
+      manifestStatusIndicator.textContent = '⏳ Starting...';
+      manifestStatusIndicator.classList.remove('inactive');
+      manifestStatusIndicator.classList.add('active');
+    }
+
     // Emit start monitor event
     socket.emit('start-monitor', {
       playerUrl,
@@ -527,6 +506,15 @@ document.addEventListener('DOMContentLoaded', () => {
         });
       });
     }
+
+    segmentReceived = false;
+
+    // Show a warning if no segments are received after 5 seconds
+    setTimeout(() => {
+      if (!segmentReceived) {
+        segmentTableBody.innerHTML = '<tr><td colspan="5" style="color:red;text-align:center;">No segments received. Check backend and profile selection.</td></tr>';
+      }
+    }, 5000);
   });
 
   stopBtn.addEventListener('click', () => {
@@ -534,6 +522,13 @@ document.addEventListener('DOMContentLoaded', () => {
     socket.emit('stop-monitor');
     startBtn.disabled = false;
     stopBtn.disabled = true;
+
+    // 🔥 NEW: Set manifest status indicator to inactive
+    if (manifestStatusIndicator) {
+      manifestStatusIndicator.textContent = '⏸️ Stopped';
+      manifestStatusIndicator.classList.add('inactive');
+      manifestStatusIndicator.classList.remove('active');
+    }
 
     if (hls) {
       hls.stopLoad();
@@ -576,4 +571,111 @@ document.addEventListener('DOMContentLoaded', () => {
       }
     }
   });
+
+  // 🔥 NEW: DevTools-style table management functions
+  function addToManifestTable(data) {
+    console.log('�� addToManifestTable: Appending new manifest row');
+    const row = createManifestRow(data);
+
+    // Keep only last 50 manifests (like DevTools)
+    const maxManifests = 50;
+    if (manifestTableBody.children.length >= maxManifests) {
+      manifestTableBody.removeChild(manifestTableBody.firstChild);
+    }
+
+    manifestTableBody.appendChild(row);
+    console.log(`✅ Manifest table updated. Total rows: ${manifestTableBody.children.length}`);
+  }
+
+  function addToSegmentTable(data) {
+    console.log('🔍 addToSegmentTable: Appending new segment row');
+    const row = createSegmentRow(data);
+
+    // Keep only last 100 segments to prevent performance issues
+    const maxSegments = 100;
+    if (segmentTableBody.children.length >= maxSegments) {
+      segmentTableBody.removeChild(segmentTableBody.firstChild);
+    }
+
+    segmentTableBody.appendChild(row);
+    console.log(`✅ Segment table updated. Total rows: ${segmentTableBody.children.length}`);
+  }
+
+  function createManifestRow(data) {
+    console.log('🔍 Creating manifest row with data:', data);
+    const row = document.createElement('tr');
+
+    // Original manifest table structure
+    const cells = [
+      `<i class="fas fa-file-code"></i> ${data.type.toUpperCase()}`,
+      `<span class="manifest-url">${data.url.split('/').pop() || data.url}</span>`,
+      formatSize(data.size),
+      formatTime(data.timestamp),
+      data.mediaSequence || '',
+      data.discontinuity ? '✓' : '',
+      formatTime(data.timestamp),
+      createHeaderButton(data.headers),
+      createManifestButton(data.content)
+    ];
+
+    console.log('📋 Manifest cells:', cells);
+
+    cells.forEach((cellData, index) => {
+      const cell = document.createElement('td');
+      if (typeof cellData === 'string') {
+        cell.innerHTML = cellData;
+      } else if (cellData && typeof cellData === 'object' && cellData.nodeType) {
+        cell.appendChild(cellData);
+      } else {
+        cell.textContent = String(cellData || '');
+      }
+      row.appendChild(cell);
+    });
+
+    // Add highlighting for new manifests
+    row.classList.add('new-manifest');
+    setTimeout(() => {
+      row.classList.remove('new-manifest');
+    }, 3000);
+
+    console.log('✅ Manifest row created successfully');
+    return row;
+  }
+
+  function createSegmentRow(data) {
+    console.log('🔍 Creating segment row with data:', data);
+    const row = document.createElement('tr');
+
+    // Original segment table structure
+    const cells = [
+      `<i class="fas fa-file-video"></i> SEGMENT`,
+      `<span class="segment-url">${data.url.split('/').pop() || data.url}</span>`,
+      formatSize(data.size),
+      formatTime(data.timestamp),
+      createHeaderButton(data.headers)
+    ];
+
+    console.log('📋 Segment cells:', cells);
+
+    cells.forEach((cellData, index) => {
+      const cell = document.createElement('td');
+      if (typeof cellData === 'string') {
+        cell.innerHTML = cellData;
+      } else if (cellData && typeof cellData === 'object' && cellData.nodeType) {
+        cell.appendChild(cellData);
+      } else {
+        cell.textContent = String(cellData || '');
+      }
+      row.appendChild(cell);
+    });
+
+    // Add highlighting for new segments
+    row.classList.add('new-segment');
+    setTimeout(() => {
+      row.classList.remove('new-segment');
+    }, 3000);
+
+    console.log('✅ Segment row created successfully');
+    return row;
+  }
 });

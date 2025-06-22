@@ -56,19 +56,6 @@ module.exports = (io) => {
       }
     });
 
-    // Handle profile switching
-    socket.on('switch-profile', async (data) => {
-      try {
-        console.log('🔄 Profile switch request:', data);
-        const { profileUrl } = data;
-        await streamController.switchProfile(profileUrl, socket);
-        socket.emit('profile-switched', { message: 'Profile switched successfully' });
-      } catch (error) {
-        console.error('❌ Profile switch error:', error);
-        socket.emit('error', { message: error.message });
-      }
-    });
-
     // Handle client disconnect
     socket.on('disconnect', () => {
       console.log(`🔌 Client disconnected: ${socket.id}`);

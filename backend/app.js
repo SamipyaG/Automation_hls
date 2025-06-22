@@ -16,34 +16,31 @@ app.use(express.static(path.join(__dirname, '../public')));
 // API Routes
 app.use('/api', streamRoutes);
 
-// Routes
-app.get('/api/status', (req, res) => {
-  res.json({
-    status: 'running',
-    timestamp: new Date().toISOString(),
-    uptime: process.uptime()
-  });
-});
-
 // Favicon route
 app.get('/favicon.ico', (req, res) => {
   res.status(204).end();
 });
 
-// Serve index.html for all other routes
+// Serve index.html for all other routes (SPA support)
 app.get('*', (req, res) => {
   res.sendFile(path.join(__dirname, '../public/index.html'));
 });
 
+// Create HTTP server
 const server = http.createServer(app);
+
+// Configure Socket.IO
 const io = new Server(server, {
   cors: {
     origin: '*',
     methods: ['GET', 'POST']
-  }
+  },
+  transports: ['websocket', 'polling'],
+  pingTimeout: 60000,
+  pingInterval: 25000
 });
 
-// Bind socket events
+// Initialize socket handler
 socketHandler(io);
 
 module.exports = { app, server }; 
