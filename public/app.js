@@ -384,21 +384,28 @@ document.addEventListener('DOMContentLoaded', () => {
   // Track if any segments have been received
   let segmentReceived = false;
 
-  socket.on('new-segment', (data) => {
+  // Store seen segment IDs to avoid duplicates (like manifest table)
+  const seenSegmentIds = new Set();
+
+  // Listen for segment-update events (not new-segment)
+  socket.on('segment-update', (data) => {
     segmentReceived = true;
-    console.log('🎬 Received new-segment event:', data);
+    console.log('🎬 Received segment-update event:', data);
     if (!data) {
       console.error('❌ Received empty segment data');
       return;
     }
 
-    console.log('✅ Processing segment for:', data.url);
-    segmentCountValue++;
-    addToSegmentTable(data);
-    updateCounters();
-
-    // 🔥 NEW: Log segment info like developer tools
-    console.log(`📊 Segment #${data.sequence}: ${formatSize(data.size)} | Download: ${data.downloadTime}ms`);
+    // Only append if this segment is truly new (by unique id)
+    if (!seenSegmentIds.has(data.id)) {
+      seenSegmentIds.add(data.id);
+      segmentCountValue++;
+      addToSegmentTable(data);
+      updateCounters();
+      console.log(`📊 Segment #${data.sequence}: ${formatSize(data.size)} | Download: ${data.downloadTime}ms`);
+    } else {
+      console.log('⏭️ Skipping duplicate segment row for id:', data.id);
+    }
   });
 
   socket.on('profiles-available', (profiles) => {
@@ -410,6 +417,16 @@ document.addEventListener('DOMContentLoaded', () => {
       existingSelector.remove();
     }
     rightPanel.insertBefore(profileSelector, videoPlayer);
+
+    // Auto-select the first profile and emit selection
+    if (profiles && profiles.length > 0) {
+      const firstProfile = profiles[0];
+      console.log('⚡ Auto-selecting first profile:', firstProfile);
+      socket.emit('select-profile', firstProfile.uri);
+      // Optionally, update the selector UI
+      const select = profileSelector.querySelector('select');
+      if (select) select.selectedIndex = 0;
+    }
   });
 
   socket.on('profile-selected', (data) => {
@@ -574,7 +591,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
   // 🔥 NEW: DevTools-style table management functions
   function addToManifestTable(data) {
-    console.log('�� addToManifestTable: Appending new manifest row');
+    console.log('🔍 addToManifestTable: Appending new manifest row');
     const row = createManifestRow(data);
 
     // Keep only last 50 manifests (like DevTools)
@@ -590,15 +607,9 @@ document.addEventListener('DOMContentLoaded', () => {
   function addToSegmentTable(data) {
     console.log('🔍 addToSegmentTable: Appending new segment row');
     const row = createSegmentRow(data);
-
-    // Keep only last 100 segments to prevent performance issues
-    const maxSegments = 100;
-    if (segmentTableBody.children.length >= maxSegments) {
-      segmentTableBody.removeChild(segmentTableBody.firstChild);
-    }
-
     segmentTableBody.appendChild(row);
-    console.log(`✅ Segment table updated. Total rows: ${segmentTableBody.children.length}`);
+    // Optionally, scroll to bottom for new row
+    segmentTableBody.parentElement.scrollTop = segmentTableBody.parentElement.scrollHeight;
   }
 
   function createManifestRow(data) {
@@ -645,37 +656,27 @@ document.addEventListener('DOMContentLoaded', () => {
   function createSegmentRow(data) {
     console.log('🔍 Creating segment row with data:', data);
     const row = document.createElement('tr');
-
-    // Original segment table structure
-    const cells = [
-      `<i class="fas fa-file-video"></i> SEGMENT`,
-      `<span class="segment-url">${data.url.split('/').pop() || data.url}</span>`,
-      formatSize(data.size),
-      formatTime(data.timestamp),
-      createHeaderButton(data.headers)
-    ];
-
-    console.log('📋 Segment cells:', cells);
-
-    cells.forEach((cellData, index) => {
-      const cell = document.createElement('td');
-      if (typeof cellData === 'string') {
-        cell.innerHTML = cellData;
-      } else if (cellData && typeof cellData === 'object' && cellData.nodeType) {
-        cell.appendChild(cellData);
-      } else {
-        cell.textContent = String(cellData || '');
-      }
-      row.appendChild(cell);
-    });
-
-    // Add highlighting for new segments
-    row.classList.add('new-segment');
-    setTimeout(() => {
-      row.classList.remove('new-segment');
-    }, 3000);
-
-    console.log('✅ Segment row created successfully');
+    row.className = 'segment-row';
+    // Type
+    const typeCell = document.createElement('td');
+    typeCell.innerHTML = '<i class="fas fa-file-video"></i> SEGMENT';
+    row.appendChild(typeCell);
+    // URL
+    const urlCell = document.createElement('td');
+    urlCell.innerHTML = `<span class="segment-url">${data.url.split('/').pop()}</span>`;
+    row.appendChild(urlCell);
+    // Size
+    const sizeCell = document.createElement('td');
+    sizeCell.textContent = formatSize(data.size);
+    row.appendChild(sizeCell);
+    // Time
+    const timeCell = document.createElement('td');
+    timeCell.textContent = formatTime(data.timestamp);
+    row.appendChild(timeCell);
+    // Headers
+    const headersCell = document.createElement('td');
+    headersCell.appendChild(createHeaderButton(data.headers));
+    row.appendChild(headersCell);
     return row;
   }
 });
