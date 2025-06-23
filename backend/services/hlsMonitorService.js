@@ -106,9 +106,7 @@ class StreamMonitor extends EventEmitter {
       const requestUrl = response.request?.res?.responseUrl || this.playerUrl;
 
       // Parse master playlist
-      this.profiles = M3U8Parser.parseMasterPlaylist(response.data);
-
-      // 🔥 NEW: DevTools-style manifest processing
+      this.profiles = M3U8Parser.parseMasterPlaylist(response.data);      // 🔥 NEW: DevTools-style manifest processing
       this.processManifest({
         url: this.playerUrl,
         requestUrl: requestUrl,
@@ -117,6 +115,7 @@ class StreamMonitor extends EventEmitter {
         headers: response.headers,
         content: response.data,
         fetchTime,
+        downloadTime: fetchTime, // Add downloadTime for consistency
         profiles: this.profiles.length,
         isMaster: true
       });
@@ -150,9 +149,7 @@ class StreamMonitor extends EventEmitter {
         resolvedUrl: this.currentProfileUrl,
         bandwidth: this.selectedProfile.bandwidth,
         resolution: this.selectedProfile.resolution
-      });
-
-      // Emit manifest-update immediately after profile selection
+      });      // Emit manifest-update immediately after profile selection
       try {
         const startTime = Date.now();
         const response = await axios.get(this.currentProfileUrl, {
@@ -162,13 +159,12 @@ class StreamMonitor extends EventEmitter {
         });
         const fetchTime = Date.now() - startTime;
         const requestUrl = response.request?.res?.responseUrl || this.currentProfileUrl;
-        const mediaPlaylist = M3U8Parser.parseMediaPlaylist(response.data);
-        const manifestEntry = {
+        const mediaPlaylist = M3U8Parser.parseMediaPlaylist(response.data);        const manifestEntry = {
           url: this.currentProfileUrl,
           requestUrl: requestUrl,
           type: 'variant',
           status: response.status,
-          size: response.headers['content-length'],
+          size: response.headers['content-length'] || Buffer.byteLength(response.data, 'utf8'),
           timing: fetchTime,
           mediaSequence: mediaPlaylist.mediaSequence,
           discontinuity: false,
@@ -179,15 +175,22 @@ class StreamMonitor extends EventEmitter {
           isNew: true
         };
         this.socket.emit('manifest-update', manifestEntry);
+        
+        // Start reactive monitoring with initial segments
+        await this.reactiveSegmentCheck(mediaPlaylist, requestUrl);
       } catch (err) {
         console.error('❌ Error emitting immediate manifest-update after profile selection:', err);
       }
 
-      // Start reactive monitoring of the selected profile
+      // Start reactive monitoring of the selected profile (with delay)
       this.lastMediaSequence = null;
       this.seenSegments = new Set();
       this.isRunning = true;
-      this.reactiveManifestLoop();
+      
+      // Start polling loop after a short delay to avoid duplicate manifests
+      setTimeout(() => {
+        this.reactiveManifestLoop();
+      }, 5000); // 5 second delay before starting continuous polling
 
     } catch (error) {
       console.error('❌ Failed to select profile:', error);
@@ -212,15 +215,14 @@ class StreamMonitor extends EventEmitter {
         const discontinuityCount = (response.data.match(/#EXT-X-DISCONTINUITY/g) || []).length;
         const manifestHash = crypto.createHash('sha256').update(response.data).digest('hex');
         // Log every fetch for debugging
-        console.log(`[POLL] Fetched mediaSequence: ${newMediaSequence}, hash: ${manifestHash}, time: ${new Date().toISOString()}`);
-        // Always emit manifest-update (real-time, every poll)
+        console.log(`[POLL] Fetched mediaSequence: ${newMediaSequence}, hash: ${manifestHash}, time: ${new Date().toISOString()}`);        // Always emit manifest-update (real-time, every poll)
         const manifestEntry = {
           url: this.currentProfileUrl,
           requestUrl: requestUrl,
           type: 'variant',
           status: response.status,
           statusCode: response.status,
-          size: response.headers['content-length'],
+          size: response.headers['content-length'] || Buffer.byteLength(response.data, 'utf8'),
           timing: fetchTime,
           downloadTime: fetchTime,
           mediaSequence: newMediaSequence,
@@ -232,66 +234,103 @@ class StreamMonitor extends EventEmitter {
           id: Date.now() + Math.random(),
           isNew: true
         };
+
+        // 🔍 DEBUG: Log size calculation details for variant manifests
+        const contentLengthHeader = response.headers['content-length'];
+        const calculatedSize = Buffer.byteLength(response.data, 'utf8');
+        console.log('📏 Variant Size Debug:', {
+          url: this.currentProfileUrl.split('/').pop(),
+          contentLengthHeader: contentLengthHeader,
+          calculatedSize: calculatedSize,
+          finalSize: manifestEntry.size,
+          contentEncoding: response.headers['content-encoding'],
+          dataLength: response.data.length
+        });
         this.socket.emit('manifest-update', manifestEntry);
         this.lastMediaSequence = newMediaSequence;
         this.lastManifestHash = manifestHash;
-        this.lastManifestTime = Date.now();
-        // Alarm check for manifest
+        this.lastManifestTime = Date.now();        // Alarm check for manifest
         const alarms = checkForAlarms(manifestEntry, { lastMediaSequence: this.lastMediaSequence, lastManifestTime: this.lastManifestTime });
         if (alarms.length > 0) alarms.forEach(alarm => this.socket.emit('alarm', alarm));
         await this.reactiveSegmentCheck(mediaPlaylist, requestUrl);
-        // Immediately fetch again (no delay, no timer)
+        
+        // Use target duration from manifest for polling interval (typically 2-10 seconds)
+        const targetDuration = mediaPlaylist.targetDuration || 6; // Default to 6 seconds
+        const pollInterval = Math.max(targetDuration * 1000, 2000); // At least 2 seconds
+        console.log(`⏱️ Next poll in ${pollInterval}ms (target duration: ${targetDuration}s)`);
+        await new Promise(resolve => setTimeout(resolve, pollInterval));
       } catch (error) {
         console.error('❌ Error in reactive manifest loop:', error);
         this.socket.emit('error', { message: error.message });
         await new Promise(resolve => setTimeout(resolve, 1000));
       }
     }
-  }
-
-  // --- REACTIVE SEGMENT EMISSION ---
+  }  // --- REACTIVE SEGMENT EMISSION ---
   async reactiveSegmentCheck(mediaPlaylist, requestUrl) {
     let lastSegmentSequence = null;
+    const segmentPromises = []; // Batch process segments to avoid overwhelming
+    
     for (let i = 0; i < mediaPlaylist.segments.length; i++) {
       const segment = mediaPlaylist.segments[i];
       const segmentSequence = mediaPlaylist.mediaSequence + i;
       const segmentUrl = M3U8Parser.resolveUrl(this.currentProfileUrl, segment.uri);
       const segmentKey = `${segmentUrl}-${segmentSequence}`;
+      
+      // Only emit truly new segments (not seen before)
       if (!this.seenSegments.has(segmentKey)) {
         this.seenSegments.add(segmentKey);
-        // Fetch segment HEAD for details
-        try {
-          const startTime = Date.now();
-          const response = await axios.head(segmentUrl, {
-            timeout: 10000,
-            maxRedirects: 5,
-            headers: { 'User-Agent': 'HLS-Analyzer/1.0' }
-          });
-          const downloadTime = Date.now() - startTime;
-          const finalUrl = response.request?.res?.responseUrl || segmentUrl;
-          // Emit only new segment
-          const segmentEntry = {
-            url: segmentUrl,
-            requestUrl: finalUrl,
-            sequence: segmentSequence,
-            discontinuity: segment.discontinuity,
-            size: response.headers['content-length'],
-            downloadTime: downloadTime,
-            status: response.status,
-            statusCode: response.status,
-            headers: response.headers,
-            timestamp: Date.now(),
-            id: Date.now() + Math.random()
-          };
-          this.socket.emit('segment-update', segmentEntry);
-          // Alarm check for segment
-          const alarms = checkForAlarms(segmentEntry, { lastMediaSequence: lastSegmentSequence });
-          if (alarms.length > 0) alarms.forEach(alarm => this.socket.emit('alarm', alarm));
-          lastSegmentSequence = segmentSequence;
-        } catch (err) {
-          console.error('❌ Error fetching segment HEAD:', segmentUrl, err.message);
+        console.log(`🎬 NEW SEGMENT: #${segmentSequence} - ${segmentUrl.split('/').pop()}`);
+        
+        // Add to batch processing (limit concurrent requests)
+        if (segmentPromises.length < 3) { // Max 3 concurrent segment checks
+          segmentPromises.push(this.fetchSegmentDetails(segmentUrl, segmentSequence, segment.discontinuity));
         }
       }
+    }
+    
+    // Process segment batch
+    if (segmentPromises.length > 0) {
+      try {
+        await Promise.allSettled(segmentPromises);
+      } catch (error) {
+        console.error('❌ Error processing segment batch:', error);
+      }
+    }
+  }
+  
+  async fetchSegmentDetails(segmentUrl, segmentSequence, discontinuity) {
+    try {
+      const startTime = Date.now();
+      const response = await axios.head(segmentUrl, {
+        timeout: 5000, // Reduced timeout
+        maxRedirects: 3,
+        headers: { 'User-Agent': 'HLS-Analyzer/1.0' }
+      });
+      const downloadTime = Date.now() - startTime;
+      const finalUrl = response.request?.res?.responseUrl || segmentUrl;
+        // Emit segment update
+      const segmentEntry = {
+        url: segmentUrl,
+        requestUrl: finalUrl,
+        sequence: segmentSequence,
+        discontinuity: discontinuity,
+        size: response.headers['content-length'] || Buffer.byteLength(response.data),
+        downloadTime: downloadTime,
+        status: response.status,
+        statusCode: response.status,
+        headers: response.headers,
+        timestamp: Date.now(),
+        id: `${segmentSequence}-${Date.now()}`
+      };
+      
+      this.socket.emit('segment-update', segmentEntry);
+      
+      // Alarm check for segment
+      const alarms = checkForAlarms(segmentEntry, { lastMediaSequence: segmentSequence });
+      if (alarms.length > 0) alarms.forEach(alarm => this.socket.emit('alarm', alarm));
+      
+    } catch (err) {
+      console.error('❌ Error fetching segment details:', segmentUrl, err.message);
     }
   }
 
@@ -307,15 +346,14 @@ class StreamMonitor extends EventEmitter {
       this.manifests.set(manifestData.url, manifestData);
     } else {
       console.log('🔄 Processing existing manifest for continuous monitoring...');
-    }
-
-    const entry = {
+    }    const entry = {
       url: manifestData.url,
       requestUrl: manifestData.requestUrl,
       type: manifestData.isMaster ? 'master' : 'variant',
       status: manifestData.status,
-      size: manifestData.headers['content-length'],
+      size: manifestData.headers['content-length'] || Buffer.byteLength(manifestData.content, 'utf8'),
       timing: manifestData.fetchTime,
+      downloadTime: manifestData.fetchTime, // Add downloadTime field for frontend display
       mediaSequence: manifestData.mediaSequence || null,
       discontinuity: false, // Manifests don't have discontinuities
       headers: manifestData.headers,
@@ -324,6 +362,18 @@ class StreamMonitor extends EventEmitter {
       id: Date.now() + Math.random(),
       isNew: isNewManifest
     };
+
+    // 🔍 DEBUG: Log size calculation details
+    const contentLengthHeader = manifestData.headers['content-length'];
+    const calculatedSize = Buffer.byteLength(manifestData.content, 'utf8');
+    console.log('📏 Size Debug:', {
+      url: manifestData.url.split('/').pop(),
+      contentLengthHeader: contentLengthHeader,
+      calculatedSize: calculatedSize,
+      finalSize: entry.size,
+      contentEncoding: manifestData.headers['content-encoding'],
+      userAgent: manifestData.headers['user-agent']
+    });
 
     // Add to history (newest at bottom, like DevTools)
     this.manifestHistory.push(entry);

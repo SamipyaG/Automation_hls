@@ -53,7 +53,6 @@ document.addEventListener('DOMContentLoaded', () => {
       connectionStatus.innerHTML = '<i class="fas fa-server"></i> Server Error: ' + error.message;
       connectionStatus.style.color = '#e74c3c';
     });
-
   const startBtn = document.getElementById('startBtn');
   const stopBtn = document.getElementById('stopBtn');
   const sourceTypeSelect = document.getElementById('sourceType');
@@ -66,6 +65,10 @@ document.addEventListener('DOMContentLoaded', () => {
   const segmentCount = document.getElementById('segmentCount');
   const videoPlayer = document.getElementById('hls-video');
   const manifestStatusIndicator = document.getElementById('manifestStatusIndicator');
+  
+  // Threshold Configuration Elements
+  const manifestThreshold = document.getElementById('manifestThreshold');
+  const segmentThreshold = document.getElementById('segmentThreshold');
 
   // Verify DOM elements
   console.log('DOM Elements:', {
@@ -77,7 +80,9 @@ document.addEventListener('DOMContentLoaded', () => {
     segmentCount: !!segmentCount,
     videoPlayer: !!videoPlayer,
     connectionStatus: !!connectionStatus,
-    manifestStatusIndicator: !!manifestStatusIndicator
+    manifestStatusIndicator: !!manifestStatusIndicator,
+    manifestThreshold: !!manifestThreshold,
+    segmentThreshold: !!segmentThreshold
   });
 
   let manifestCountValue = 0;
@@ -119,11 +124,11 @@ document.addEventListener('DOMContentLoaded', () => {
   } else {
     console.warn('HLS.js is not supported');
   }
-
   function formatSize(size) {
-    if (!size) return '-';
+    if (!size || size === 'undefined' || size === 'null') return '-';
     const units = ['B', 'KB', 'MB', 'GB'];
     let value = parseInt(size);
+    if (isNaN(value)) return '-';
     let unitIndex = 0;
     while (value >= 1024 && unitIndex < units.length - 1) {
       value /= 1024;
@@ -307,9 +312,7 @@ document.addEventListener('DOMContentLoaded', () => {
       const bandwidth = profile.bandwidth ? formatBandwidth(profile.bandwidth) : 'Unknown';
       option.textContent = `${resolution} (${bandwidth})`;
       select.appendChild(option);
-    });
-
-    select.onchange = () => {
+    });    select.onchange = () => {
       const selectedUri = select.value;
       if (selectedUri) {
         console.log('🎯 User selected profile:', selectedUri);
@@ -369,35 +372,89 @@ document.addEventListener('DOMContentLoaded', () => {
       hash = ((hash << 5) + hash) + str.charCodeAt(i);
     }
     return hash >>> 0; // unsigned
-  }
-
-  // Listen for manifest-update events
+  }  // Listen for manifest-update events
   socket.on('manifest-update', (data) => {
     console.log('📋 Received manifest-update event:', data);
+    console.log('📋 Data analysis:', { 
+      type: data.type, 
+      isMaster: data.isMaster, 
+      mediaSequence: data.mediaSequence, 
+      url: data.url,
+      isVariant: data.type === 'variant'
+    });
+    
     if (!data) {
       console.error('❌ Received empty manifest data');
       return;
     }
-    // Always append a new row for every manifest-update event (show every poll)
+    
+    // Always increment counter for debugging
     manifestCountValue++;
+    console.log('📋 Manifest counter:', manifestCountValue);
+    
+    // Add to manifest table
     addToManifestTable(data);
     updateCounters();
-    console.log(`📋 Manifest #${data.mediaSequence}: ${formatSize(data.size)} | Time: ${data.timestamp}`);
+    
+    console.log(`📋 Manifest #${data.mediaSequence || 'N/A'}: ${formatSize(data.size)} | Time: ${data.timestamp}`);
     resetManifestWaitingTimer();
 
-    // NEW: Always update manifest table for continuous monitoring
+    // Update manifest status indicator
     if (manifestStatusIndicator) {
       const now = new Date().toLocaleTimeString();
       manifestStatusIndicator.textContent = `🔄 Live (${now})`;
       manifestStatusIndicator.classList.remove('inactive');
       manifestStatusIndicator.classList.add('active');
-    }
-
-    // Update video player if this is a variant manifest (selected profile)
-    if (data.type === 'variant' && hls) {
-      console.log('🎥 Updating video player with selected profile:', data.url);
-      currentUrl = data.url;
-      hls.loadSource(data.url);
+    }// Update video player if this is a variant manifest (selected profile)
+    if (data.type === 'variant' && hls && data.url) {
+      console.log('🎥 Variant manifest received for video player:', data.url);
+      
+      // Only load the video player when URL changes, not on every manifest update
+      if (currentUrl !== data.url) {
+        currentUrl = data.url;
+        console.log('🎥 Loading new video source:', data.url);
+        
+        try {
+          // Clear any existing source first
+          hls.stopLoad();
+          hls.detachMedia();
+          hls.attachMedia(videoPlayer);
+          
+          // Load the new source
+          hls.loadSource(data.url);
+          
+          // Set up event handlers for playback
+          const onManifestParsed = () => {
+            console.log('✅ HLS manifest parsed successfully');
+            hls.off(Hls.Events.MANIFEST_PARSED, onManifestParsed);
+            
+            // Auto-start playback
+            setTimeout(() => {
+              videoPlayer.play().then(() => {
+                console.log('🎬 Video playback started successfully');
+              }).catch(error => {
+                console.warn('⚠️ Auto-play prevented, click to play:', error.message);
+                // Show a play button overlay or similar UI
+              });
+            }, 500);
+          };
+          
+          hls.on(Hls.Events.MANIFEST_PARSED, onManifestParsed);
+          
+        } catch (error) {
+          console.error('❌ Error setting up video player:', error);
+          
+          // Fallback for native HLS support (Safari)
+          if (videoPlayer.canPlayType('application/vnd.apple.mpegurl')) {
+            console.log('🔄 Trying native HLS playback...');
+            videoPlayer.src = data.url;
+            videoPlayer.load();
+            videoPlayer.play().catch(err => {
+              console.warn('⚠️ Native HLS auto-play also prevented:', err.message);
+            });
+          }
+        }
+      }
     }
   });
 
@@ -425,9 +482,7 @@ document.addEventListener('DOMContentLoaded', () => {
     } else {
       console.log('⏭️ Skipping duplicate segment row for id:', data.id);
     }
-  });
-
-  socket.on('profiles-available', (profiles) => {
+  });  socket.on('profiles-available', (profiles) => {
     console.log('📋 Received available profiles:', profiles);
     const profileSelector = createProfileSelector(profiles);
     const rightPanel = document.querySelector('.right-panel section');
@@ -437,14 +492,17 @@ document.addEventListener('DOMContentLoaded', () => {
     }
     rightPanel.insertBefore(profileSelector, videoPlayer);
 
-    // Auto-select the first profile and emit selection
+    // AUTO-SELECT the first profile for immediate video playback
     if (profiles && profiles.length > 0) {
       const firstProfile = profiles[0];
-      console.log('⚡ Auto-selecting first profile:', firstProfile);
-      socket.emit('select-profile', firstProfile.uri);
-      // Optionally, update the selector UI
+      console.log('🎬 Auto-selecting first profile for video playback:', firstProfile);
+      socket.emit('select-profile', { profileUri: firstProfile.uri });
+      
+      // Update the selector UI to show the selected profile
       const select = profileSelector.querySelector('select');
-      if (select) select.selectedIndex = 0;
+      if (select) {
+        select.value = firstProfile.uri;
+      }
     }
   });
 
@@ -518,9 +576,7 @@ document.addEventListener('DOMContentLoaded', () => {
       manifestStatusIndicator.textContent = '⏳ Starting...';
       manifestStatusIndicator.classList.remove('inactive');
       manifestStatusIndicator.classList.add('active');
-    }
-
-    // Emit start monitor event
+    }    // Emit start monitor event
     socket.emit('start-monitor', {
       playerUrl,
       sourceType: sourceTypeSelect.value,
@@ -531,17 +587,9 @@ document.addEventListener('DOMContentLoaded', () => {
     startBtn.disabled = true;
     stopBtn.disabled = false;
 
-    // Start video playback
-    if (hls) {
-      currentUrl = playerUrl;
-      hls.loadSource(playerUrl);
-      hls.on(Hls.Events.MANIFEST_PARSED, () => {
-        console.log('✅ HLS manifest parsed, starting playback');
-        videoPlayer.play().catch(error => {
-          console.error('❌ Error starting video playback:', error);
-        });
-      });
-    }
+    // Don't start video playback here - wait for profile selection and variant manifest
+    // The video will be loaded automatically when we receive a variant manifest in the manifest-update handler
+    console.log('⏳ Waiting for profile selection and variant manifest to start video playback...');
 
     segmentReceived = false;
 
@@ -564,11 +612,13 @@ document.addEventListener('DOMContentLoaded', () => {
       manifestStatusIndicator.textContent = '⏸️ Stopped';
       manifestStatusIndicator.classList.add('inactive');
       manifestStatusIndicator.classList.remove('active');
-    }
-
-    if (hls) {
+    }    if (hls) {
+      console.log('🛑 Stopping HLS player and clearing video source');
       hls.stopLoad();
+      hls.off(Hls.Events.MANIFEST_PARSED); // Remove event listeners
       videoPlayer.pause();
+      videoPlayer.src = ''; // Clear video source
+      currentUrl = null;
     }
   });
 
@@ -607,52 +657,101 @@ document.addEventListener('DOMContentLoaded', () => {
       }
     }
   });
-
   // NEW: DevTools-style table management functions
   function addToManifestTable(data) {
-    // Only keep last 20 rows
-    while (manifestTableBody.children.length >= 20) {
-      manifestTableBody.removeChild(manifestTableBody.firstChild);
+    console.log('🔍 addToManifestTable called with:', { isMaster: data.isMaster, type: data.type, url: data.url });
+    
+    if (data.isMaster || data.type === 'master') {
+      console.log('🔍 Processing as MASTER manifest');
+      // Master manifest: Always keep as first entry, replace if already exists
+      const existingMasterRow = manifestTableBody.querySelector('tr[data-is-master="true"]');
+      if (existingMasterRow) {
+        existingMasterRow.remove();
+      }
+      const row = createManifestRow(data);
+      row.setAttribute('data-is-master', 'true');
+      manifestTableBody.insertBefore(row, manifestTableBody.firstChild);
+    } else {
+      console.log('🔍 Processing as PROFILE manifest - maintaining rolling window of 10');
+      
+      // Profile manifest: Keep rolling window of last 10 profile manifests
+      const existingProfileRows = Array.from(manifestTableBody.querySelectorAll('tr:not([data-is-master="true"])'));
+      console.log('🔍 Current profile manifest count:', existingProfileRows.length);
+      
+      // Remove oldest profile manifests if we have 10 or more (keep last 9, add 1 new = 10 total)
+      while (existingProfileRows.length >= 10) {
+        console.log('🔍 Removing oldest profile manifest to maintain rolling window of 10');
+        const oldestProfileRow = existingProfileRows.shift();
+        oldestProfileRow.remove();
+      }
+        // Add the new profile manifest at the end
+      const row = createManifestRow(data);
+      row.setAttribute('data-is-profile', 'true');
+      console.log('🔍 Adding new profile manifest row to rolling window');
+      manifestTableBody.appendChild(row);
     }
-    const row = createManifestRow(data);
-    manifestTableBody.appendChild(row);
   }
 
   function addToSegmentTable(data) {
-    console.log('🔍 addToSegmentTable: Appending new segment row');
+    console.log('🔍 addToSegmentTable: Adding new segment row with 20-row limit');
+    
+    // Keep up to 20 segment rows (remove oldest when exceeding limit)
+    const segmentRows = Array.from(segmentTableBody.querySelectorAll('tr'));
+    console.log('🔍 Current segment rows count:', segmentRows.length);
+    
+    while (segmentRows.length >= 20) {
+      // Remove oldest segment row
+      console.log('🔍 Removing oldest segment row to maintain 20-row limit');
+      segmentRows[0].remove();
+      segmentRows.shift();
+    }
+    
     const row = createSegmentRow(data);
+    console.log('🔍 Appending new segment row to table');
     segmentTableBody.appendChild(row);
+    
     // Optionally, scroll to bottom for new row
     segmentTableBody.parentElement.scrollTop = segmentTableBody.parentElement.scrollHeight;
   }
-
   let lastManifestSequence = null;
   function createManifestRow(data) {
     const row = document.createElement('tr');
+      // Get configurable thresholds from select dropdowns
+    const manifestThresholdValue = parseInt(manifestThreshold?.value || 2000);
+    const downloadTime = data.downloadTime !== undefined ? data.downloadTime : (data.timing !== undefined ? data.timing : 0);
+    
     // Highlight row red for any error: statusCode >= 400, high download time, or sequence jump
     const statusCode = data.statusCode !== undefined ? data.statusCode : (data.status !== undefined ? data.status : 200);
     let errorTooltip = '';
+    let hasError = false;
+    
     if (statusCode >= 400) {
-      row.style.backgroundColor = '#ffcccc';
-      row.style.color = '#b71c1c';
-      errorTooltip = `HTTP Error: ${statusCode}`;
-    }
-    if (data.downloadTime !== undefined && data.downloadTime > 1000) {
-      row.style.backgroundColor = '#ffcccc';
-      row.style.color = '#b71c1c';
+      hasError = true;
+      errorTooltip = `HTTP Error: ${statusCode}`;    }
+      // Check download time threshold for all manifests (including master manifests)
+    if (downloadTime > manifestThresholdValue) {
+      hasError = true;
       errorTooltip = errorTooltip ? errorTooltip + ' | ' : '';
-      errorTooltip += `High Download Time: ${data.downloadTime}ms`;
+      errorTooltip += `High Download Time: ${downloadTime}ms (threshold: ${manifestThresholdValue}ms)`;
     }
+    
     if (typeof data.mediaSequence === 'number') {
       if (lastManifestSequence !== null && data.mediaSequence > lastManifestSequence + 1) {
-        row.style.backgroundColor = '#ffcccc';
-        row.style.color = '#b71c1c';
+        hasError = true;
         errorTooltip = errorTooltip ? errorTooltip + ' | ' : '';
         errorTooltip += `Sequence Jump: ${lastManifestSequence} → ${data.mediaSequence}`;
       }
-      lastManifestSequence = data.mediaSequence;
+      lastManifestSequence = data.mediaSequence;    }
+    
+    // Apply error styling if any threshold is exceeded
+    if (hasError) {
+      row.classList.add('threshold-exceeded');
+      row.style.backgroundColor = '#ffcccc';
+      row.style.color = '#b71c1c';
+      row.style.borderLeft = '4px solid #f44336';
+      row.title = errorTooltip;
     }
-    if (errorTooltip) row.title = errorTooltip;
+    
     // Updated manifest table structure (no sequence jump column)
     const discoCell = (typeof data.discontinuityCount !== 'undefined') ? `<span class="disco-count" title="Number of #EXT-X-DISCONTINUITY tags">${data.discontinuityCount}</span>` : '-';
     const mediaSeqCell = (typeof data.mediaSequence !== 'undefined' && data.mediaSequence !== null) ? data.mediaSequence : '-';
@@ -664,7 +763,7 @@ document.addEventListener('DOMContentLoaded', () => {
       formatSize(data.size),
       formatTime(data.timestamp),
       formatTime(data.timestamp),
-      (typeof data.downloadTime !== 'undefined' ? data.downloadTime : '-'),
+      (typeof data.downloadTime !== 'undefined' ? data.downloadTime : (typeof data.timing !== 'undefined' ? data.timing : '-')),
       (typeof data.statusCode !== 'undefined' ? data.statusCode : (typeof data.status !== 'undefined' ? data.status : '-')),
       createHeaderButton(data.headers),
       createManifestButton(data.content)
@@ -678,34 +777,40 @@ document.addEventListener('DOMContentLoaded', () => {
       } else {
         cell.textContent = String(cellData || '');
       }
-      row.appendChild(cell);
-    });
-    row.classList.add('new-manifest');
-    setTimeout(() => {
-      row.classList.remove('new-manifest');
-    }, 3000);
+      row.appendChild(cell);    });
     return row;
   }
-
   function createSegmentRow(data) {
     console.log('🔍 Creating segment row with data:', data);
     const row = document.createElement('tr');
     row.className = 'segment-row';
+      // Get configurable thresholds from select dropdowns
+    const segmentThresholdValue = parseInt(segmentThreshold?.value || 2000);
+    
     // Highlight row red for any error: statusCode >= 400 or high download time
     const statusCode = data.statusCode !== undefined ? data.statusCode : (data.status !== undefined ? data.status : 200);
     let errorTooltip = '';
+    let hasError = false;
+    
     if (statusCode >= 400) {
-      row.style.backgroundColor = '#ffcccc';
-      row.style.color = '#b71c1c';
+      hasError = true;
       errorTooltip = `HTTP Error: ${statusCode}`;
     }
-    if (data.downloadTime !== undefined && data.downloadTime > 1000) {
+    
+    if (data.downloadTime !== undefined && data.downloadTime > segmentThresholdValue) {
+      hasError = true;
+      errorTooltip = errorTooltip ? errorTooltip + ' | ' : '';
+      errorTooltip += `High Download Time: ${data.downloadTime}ms (threshold: ${segmentThresholdValue}ms)`;
+    }    
+    // Apply error styling if any threshold is exceeded
+    if (hasError) {
+      row.classList.add('threshold-exceeded');
       row.style.backgroundColor = '#ffcccc';
       row.style.color = '#b71c1c';
-      errorTooltip = errorTooltip ? errorTooltip + ' | ' : '';
-      errorTooltip += `High Download Time: ${data.downloadTime}ms`;
+      row.style.borderLeft = '4px solid #f44336';
+      row.title = errorTooltip;
     }
-    if (errorTooltip) row.title = errorTooltip;
+    
     // Updated segment table structure with Download Time and Status Code
     const cells = [
       '<i class="fas fa-file-video"></i> SEGMENT',
@@ -715,9 +820,7 @@ document.addEventListener('DOMContentLoaded', () => {
       data.downloadTime !== undefined ? data.downloadTime : '-', // Download Time (ms)
       data.statusCode !== undefined ? data.statusCode : (data.status !== undefined ? data.status : '-'), // Status Code
       createHeaderButton(data.headers)
-    ];
-
-    cells.forEach((cellData, index) => {
+    ];    cells.forEach((cellData, index) => {
       const cell = document.createElement('td');
       if (typeof cellData === 'string') {
         cell.innerHTML = cellData;
@@ -726,8 +829,7 @@ document.addEventListener('DOMContentLoaded', () => {
       } else {
         cell.textContent = String(cellData || '');
       }
-      row.appendChild(cell);
-    });
+      row.appendChild(cell);    });
 
     return row;
   }

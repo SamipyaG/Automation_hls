@@ -242,6 +242,24 @@ header h1 .fas {
   transform: translateY(-1px);
 }
 
+/* Threshold Select Styling - Using consistent UI styling (inherits from .controls select) */
+
+/* Threshold Section Styling */
+.controls h3 {
+  margin-top: 1.5rem;
+  margin-bottom: 1rem;
+  color: var(--text-primary);
+  font-size: 1rem;
+  font-weight: 600;
+  padding: 0.5rem 1rem;
+  background: linear-gradient(135deg, rgba(245, 158, 11, 0.1), rgba(245, 158, 11, 0.05));
+  border-radius: var(--radius-md);
+  border-left: 4px solid var(--warning-color);
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+}
+
 .controls button {
   padding: 0.875rem 2rem;
   margin-right: 1rem;
@@ -655,6 +673,41 @@ td:last-child {
   box-shadow: var(--shadow-sm);
 }
 
+/* Enhanced Error Row Styling with Threshold Indicators */
+.table-container tr.threshold-exceeded {
+  background: linear-gradient(90deg, rgba(244, 67, 54, 0.15) 0%, rgba(244, 67, 54, 0.08) 100%);
+  border-left: 4px solid #f44336;
+  animation: thresholdAlert 0.8s ease-in-out;
+  position: relative;
+}
+
+.table-container tr.threshold-exceeded::after {
+  content: '⚠️';
+  position: absolute;
+  right: 10px;
+  top: 50%;
+  transform: translateY(-50%);
+  font-size: 0.9em;
+  animation: pulse 1.5s infinite;
+}
+
+@keyframes thresholdAlert {
+  0% {
+    background-color: rgba(244, 67, 54, 0.4);
+    transform: translateX(-3px);
+  }
+
+  50% {
+    background-color: rgba(244, 67, 54, 0.2);
+    transform: translateX(0);
+  }
+
+  100% {
+    background-color: rgba(244, 67, 54, 0.15);
+    transform: translateX(0);
+  }
+}
+
 /* Responsive Design */
 @media (max-width: 1200px) {
   .dashboard {
@@ -890,136 +943,4 @@ td:hover {
   100% {
     background-color: rgba(33, 150, 243, 0.1);
   }
-}
-
-.segment-url,
-.manifest-url {
-  font-family: 'Courier New', monospace;
-  font-size: 0.9em;
-  color: #2196F3;
-  word-break: break-all;
-}
-
-.manifest-url {
-  color: #FF5722;
-}
-
-/* Developer tools style table */
-#segmentTable {
-  border-collapse: collapse;
-  width: 100%;
-  font-size: 0.85em;
-}
-
-#segmentTable th {
-  background: #f5f5f5;
-  border-bottom: 2px solid #ddd;
-  padding: 8px;
-  text-align: left;
-  font-weight: 600;
-  color: #333;
-}
-
-#segmentTable td {
-  padding: 6px 8px;
-  border-bottom: 1px solid #eee;
-  vertical-align: middle;
-}
-
-#segmentTable tr:hover {
-  background-color: #f8f9fa;
-}
-
-/* Segment type icon styling */
-#segmentTable td:first-child i {
-  color: #FF5722;
-  margin-right: 5px;
-}
-
-/* Size column styling */
-#segmentTable td:nth-child(3) {
-  font-family: 'Courier New', monospace;
-  font-weight: 500;
-}
-
-/* Time column styling */
-#segmentTable td:nth-child(4) {
-  color: #666;
-  font-size: 0.8em;
-}
-
-/* DevTools-style status colors */
-.status-200 {
-  color: #4CAF50;
-  font-weight: 600;
-}
-
-.status-404 {
-  color: #f44336;
-  font-weight: 600;
-}
-
-.status-500 {
-  color: #f44336;
-  font-weight: 600;
-}
-
-/* Error highlighting for slow downloads */
-.error-row {
-  background: linear-gradient(90deg, rgba(244, 67, 54, 0.1) 0%, rgba(244, 67, 54, 0.05) 100%);
-  border-left: 3px solid #f44336;
-}
-
-.error {
-  color: #f44336;
-  font-weight: 600;
-}
-
-/* Sequence styling */
-.sequence {
-  font-family: 'Courier New', monospace;
-  font-weight: 600;
-  color: #2196F3;
-}
-
-/* Discontinuity styling */
-.discontinuity {
-  color: #FF9800;
-  font-weight: 600;
-}
-
-/* Manifest and segment URL styling */
-.manifest-url,
-.segment-url {
-  font-family: 'Courier New', monospace;
-  font-size: 0.9em;
-  word-break: break-all;
-}
-
-.manifest-url {
-  color: #FF5722;
-}
-
-.segment-url {
-  color: #2196F3;
-}
-
-/* Status indicator for continuous updates */
-.status-indicator {
-  font-size: 0.8em;
-  font-weight: normal;
-  color: #4CAF50;
-  background: rgba(76, 175, 80, 0.1);
-  padding: 0.2rem 0.5rem;
-  border-radius: var(--radius-sm);
-  border: 1px solid #4CAF50;
-  margin-left: 0.5rem;
-  animation: pulse 2s infinite;
-}
-
-.status-indicator.inactive {
-  color: #9E9E9E;
-  background: rgba(158, 158, 158, 0.1);
-  border-color: #9E9E9E;
-  animation: none;
 }

@@ -46,10 +46,25 @@
           </select>
 
           <label for="channelNameInput"><i class="fas fa-tag"></i> <b>Channel Name:</b></label>
-          <input id="channelNameInput" type="text" placeholder="Enter channel name" style="margin-bottom: 10px;">
+          <input id="channelNameInput" type="text" placeholder="Enter channel name" style="margin-bottom: 10px;">          <label for="playerUrlInput"><i class="fas fa-link"></i> <b>Player URL:</b></label>
+          <input id="playerUrlInput" type="text" placeholder="Enter HLS URL (.m3u8)" style="margin-bottom: 10px;">          <!-- Threshold Configuration Section -->
+          <h3 style="margin-top: 1.5rem; margin-bottom: 1rem; color: var(--text-primary); font-size: 1rem;">
+            <i class="fas fa-exclamation-triangle"></i> Alert Thresholds
+          </h3>
+          
+          <label for="manifestThreshold"><i class="fas fa-file-code"></i> <b>Manifest Download Threshold:</b></label>
+          <select id="manifestThreshold" style="margin-bottom: 10px;" title="Variant manifest downloads above this time will be highlighted in red (excludes master manifests)">
+            <option value="1000">1 second (1000ms)</option>
+            <option value="2000" selected>2 seconds (2000ms)</option>
+            <option value="4000">4 seconds (4000ms)</option>
+          </select>
 
-          <label for="playerUrlInput"><i class="fas fa-link"></i> <b>Player URL:</b></label>
-          <input id="playerUrlInput" type="text" placeholder="Enter HLS URL (.m3u8)" style="margin-bottom: 10px;">
+          <label for="segmentThreshold"><i class="fas fa-film"></i> <b>Segment Download Threshold:</b></label>
+          <select id="segmentThreshold" style="margin-bottom: 15px;" title="Segment downloads above this time will be highlighted in red">
+            <option value="1000">1 second (1000ms)</option>
+            <option value="2000" selected>2 seconds (2000ms)</option>
+            <option value="4000">4 seconds (4000ms)</option>
+          </select>
 
           <div class="button-group">
             <button id="startBtn"><i class="fas fa-play"></i> Start Analysis</button>
