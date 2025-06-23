@@ -335,32 +335,57 @@ document.addEventListener('DOMContentLoaded', () => {
     }
   }
 
-  // Socket event handlers
+  // Track if any segments have been received
+  let segmentReceived = false;
+
+  // Store seen manifest keys to avoid duplicates (mediaSequence + hash)
+  const seenManifestKeys = new Set();
+  // Store seen segment IDs to avoid duplicates
+  const seenSegmentIds = new Set();
+
+  // Add after manifestTableBody is defined
+  const waitingManifestMsg = document.createElement('div');
+  waitingManifestMsg.id = 'waitingManifestMsg';
+  waitingManifestMsg.style.color = 'orange';
+  waitingManifestMsg.style.textAlign = 'center';
+  waitingManifestMsg.style.margin = '0.5em 0';
+  waitingManifestMsg.style.display = 'none';
+  waitingManifestMsg.textContent = '⏳ Waiting for new manifest update...';
+  manifestTableBody.parentElement.parentElement.appendChild(waitingManifestMsg);
+
+  let manifestWaitingTimer = null;
+  function resetManifestWaitingTimer() {
+    if (manifestWaitingTimer) clearTimeout(manifestWaitingTimer);
+    waitingManifestMsg.style.display = 'none';
+    manifestWaitingTimer = setTimeout(() => {
+      waitingManifestMsg.style.display = 'block';
+    }, 10000); // 10 seconds
+  }
+
+  // Fast JS hash function (djb2)
+  function hashString(str) {
+    let hash = 5381;
+    for (let i = 0; i < str.length; i++) {
+      hash = ((hash << 5) + hash) + str.charCodeAt(i);
+    }
+    return hash >>> 0; // unsigned
+  }
+
+  // Listen for manifest-update events
   socket.on('manifest-update', (data) => {
     console.log('📋 Received manifest-update event:', data);
     if (!data) {
       console.error('❌ Received empty manifest data');
       return;
     }
-
-    console.log('✅ Processing manifest for:', data.url);
-    console.log('📊 Manifest details:', {
-      type: data.type,
-      isNew: data.isNew,
-      mediaSequence: data.mediaSequence,
-      timestamp: data.timestamp,
-      url: data.url.split('/').pop()
-    });
-
-    // Only increment counter for new manifests, but always update table
-    if (data.isNew !== false) {
-      manifestCountValue++;
-    }
-
+    // Always append a new row for every manifest-update event (show every poll)
+    manifestCountValue++;
     addToManifestTable(data);
     updateCounters();
+    console.log(`📋 Manifest #${data.mediaSequence}: ${formatSize(data.size)} | Time: ${data.timestamp}`);
+    resetManifestWaitingTimer();
 
-    // 🔥 NEW: Always update manifest table for continuous monitoring
+    // NEW: Always update manifest table for continuous monitoring
     if (manifestStatusIndicator) {
       const now = new Date().toLocaleTimeString();
       manifestStatusIndicator.textContent = `🔄 Live (${now})`;
@@ -380,12 +405,6 @@ document.addEventListener('DOMContentLoaded', () => {
   socket.onAny((event, ...args) => {
     console.log(`[SOCKET DEBUG] Event: ${event}`, ...args);
   });
-
-  // Track if any segments have been received
-  let segmentReceived = false;
-
-  // Store seen segment IDs to avoid duplicates (like manifest table)
-  const seenSegmentIds = new Set();
 
   // Listen for segment-update events (not new-segment)
   socket.on('segment-update', (data) => {
@@ -440,7 +459,7 @@ document.addEventListener('DOMContentLoaded', () => {
     startBtn.disabled = true;
     stopBtn.disabled = false;
 
-    // 🔥 NEW: Set manifest status indicator to active
+    // NEW: Set manifest status indicator to active
     if (manifestStatusIndicator) {
       const now = new Date().toLocaleTimeString();
       manifestStatusIndicator.textContent = `🔄 Live (${now})`;
@@ -454,7 +473,7 @@ document.addEventListener('DOMContentLoaded', () => {
     startBtn.disabled = false;
     stopBtn.disabled = true;
 
-    // 🔥 NEW: Set manifest status indicator to inactive
+    // NEW: Set manifest status indicator to inactive
     if (manifestStatusIndicator) {
       manifestStatusIndicator.textContent = '⏸️ Stopped';
       manifestStatusIndicator.classList.add('inactive');
@@ -494,7 +513,7 @@ document.addEventListener('DOMContentLoaded', () => {
     segmentTableBody.innerHTML = '';
     updateCounters();
 
-    // 🔥 NEW: Reset manifest status indicator
+    // NEW: Reset manifest status indicator
     if (manifestStatusIndicator) {
       manifestStatusIndicator.textContent = '⏳ Starting...';
       manifestStatusIndicator.classList.remove('inactive');
@@ -540,7 +559,7 @@ document.addEventListener('DOMContentLoaded', () => {
     startBtn.disabled = false;
     stopBtn.disabled = true;
 
-    // 🔥 NEW: Set manifest status indicator to inactive
+    // NEW: Set manifest status indicator to inactive
     if (manifestStatusIndicator) {
       manifestStatusIndicator.textContent = '⏸️ Stopped';
       manifestStatusIndicator.classList.add('inactive');
@@ -589,19 +608,14 @@ document.addEventListener('DOMContentLoaded', () => {
     }
   });
 
-  // 🔥 NEW: DevTools-style table management functions
+  // NEW: DevTools-style table management functions
   function addToManifestTable(data) {
-    console.log('🔍 addToManifestTable: Appending new manifest row');
-    const row = createManifestRow(data);
-
-    // Keep only last 50 manifests (like DevTools)
-    const maxManifests = 50;
-    if (manifestTableBody.children.length >= maxManifests) {
+    // Only keep last 20 rows
+    while (manifestTableBody.children.length >= 20) {
       manifestTableBody.removeChild(manifestTableBody.firstChild);
     }
-
+    const row = createManifestRow(data);
     manifestTableBody.appendChild(row);
-    console.log(`✅ Manifest table updated. Total rows: ${manifestTableBody.children.length}`);
   }
 
   function addToSegmentTable(data) {
@@ -612,24 +626,96 @@ document.addEventListener('DOMContentLoaded', () => {
     segmentTableBody.parentElement.scrollTop = segmentTableBody.parentElement.scrollHeight;
   }
 
+  let lastManifestSequence = null;
   function createManifestRow(data) {
-    console.log('🔍 Creating manifest row with data:', data);
     const row = document.createElement('tr');
-
-    // Original manifest table structure
+    // Highlight row red for any error: statusCode >= 400, high download time, or sequence jump
+    const statusCode = data.statusCode !== undefined ? data.statusCode : (data.status !== undefined ? data.status : 200);
+    let errorTooltip = '';
+    if (statusCode >= 400) {
+      row.style.backgroundColor = '#ffcccc';
+      row.style.color = '#b71c1c';
+      errorTooltip = `HTTP Error: ${statusCode}`;
+    }
+    if (data.downloadTime !== undefined && data.downloadTime > 1000) {
+      row.style.backgroundColor = '#ffcccc';
+      row.style.color = '#b71c1c';
+      errorTooltip = errorTooltip ? errorTooltip + ' | ' : '';
+      errorTooltip += `High Download Time: ${data.downloadTime}ms`;
+    }
+    if (typeof data.mediaSequence === 'number') {
+      if (lastManifestSequence !== null && data.mediaSequence > lastManifestSequence + 1) {
+        row.style.backgroundColor = '#ffcccc';
+        row.style.color = '#b71c1c';
+        errorTooltip = errorTooltip ? errorTooltip + ' | ' : '';
+        errorTooltip += `Sequence Jump: ${lastManifestSequence} → ${data.mediaSequence}`;
+      }
+      lastManifestSequence = data.mediaSequence;
+    }
+    if (errorTooltip) row.title = errorTooltip;
+    // Updated manifest table structure (no sequence jump column)
+    const discoCell = (typeof data.discontinuityCount !== 'undefined') ? `<span class="disco-count" title="Number of #EXT-X-DISCONTINUITY tags">${data.discontinuityCount}</span>` : '-';
+    const mediaSeqCell = (typeof data.mediaSequence !== 'undefined' && data.mediaSequence !== null) ? data.mediaSequence : '-';
     const cells = [
-      `<i class="fas fa-file-code"></i> ${data.type.toUpperCase()}`,
-      `<span class="manifest-url">${data.url.split('/').pop() || data.url}</span>`,
+      `<i class=\"fas fa-file-code\"></i> ${data.type.toUpperCase()}`,
+      `<span class=\"manifest-url\">${data.url.split('/').pop() || data.url}</span>`,
+      mediaSeqCell,
+      discoCell,
       formatSize(data.size),
       formatTime(data.timestamp),
-      data.mediaSequence || '',
-      data.discontinuity ? '✓' : '',
       formatTime(data.timestamp),
+      (typeof data.downloadTime !== 'undefined' ? data.downloadTime : '-'),
+      (typeof data.statusCode !== 'undefined' ? data.statusCode : (typeof data.status !== 'undefined' ? data.status : '-')),
       createHeaderButton(data.headers),
       createManifestButton(data.content)
     ];
+    cells.forEach((cellData) => {
+      const cell = document.createElement('td');
+      if (typeof cellData === 'string' || typeof cellData === 'number') {
+        cell.innerHTML = cellData;
+      } else if (cellData && typeof cellData === 'object' && cellData.nodeType) {
+        cell.appendChild(cellData);
+      } else {
+        cell.textContent = String(cellData || '');
+      }
+      row.appendChild(cell);
+    });
+    row.classList.add('new-manifest');
+    setTimeout(() => {
+      row.classList.remove('new-manifest');
+    }, 3000);
+    return row;
+  }
 
-    console.log('📋 Manifest cells:', cells);
+  function createSegmentRow(data) {
+    console.log('🔍 Creating segment row with data:', data);
+    const row = document.createElement('tr');
+    row.className = 'segment-row';
+    // Highlight row red for any error: statusCode >= 400 or high download time
+    const statusCode = data.statusCode !== undefined ? data.statusCode : (data.status !== undefined ? data.status : 200);
+    let errorTooltip = '';
+    if (statusCode >= 400) {
+      row.style.backgroundColor = '#ffcccc';
+      row.style.color = '#b71c1c';
+      errorTooltip = `HTTP Error: ${statusCode}`;
+    }
+    if (data.downloadTime !== undefined && data.downloadTime > 1000) {
+      row.style.backgroundColor = '#ffcccc';
+      row.style.color = '#b71c1c';
+      errorTooltip = errorTooltip ? errorTooltip + ' | ' : '';
+      errorTooltip += `High Download Time: ${data.downloadTime}ms`;
+    }
+    if (errorTooltip) row.title = errorTooltip;
+    // Updated segment table structure with Download Time and Status Code
+    const cells = [
+      '<i class="fas fa-file-video"></i> SEGMENT',
+      `<span class="segment-url">${data.url.split('/').pop()}</span>`,
+      formatSize(data.size),
+      formatTime(data.timestamp),
+      data.downloadTime !== undefined ? data.downloadTime : '-', // Download Time (ms)
+      data.statusCode !== undefined ? data.statusCode : (data.status !== undefined ? data.status : '-'), // Status Code
+      createHeaderButton(data.headers)
+    ];
 
     cells.forEach((cellData, index) => {
       const cell = document.createElement('td');
@@ -643,40 +729,106 @@ document.addEventListener('DOMContentLoaded', () => {
       row.appendChild(cell);
     });
 
-    // Add highlighting for new manifests
-    row.classList.add('new-manifest');
-    setTimeout(() => {
-      row.classList.remove('new-manifest');
-    }, 3000);
-
-    console.log('✅ Manifest row created successfully');
     return row;
   }
 
-  function createSegmentRow(data) {
-    console.log('🔍 Creating segment row with data:', data);
-    const row = document.createElement('tr');
-    row.className = 'segment-row';
-    // Type
-    const typeCell = document.createElement('td');
-    typeCell.innerHTML = '<i class="fas fa-file-video"></i> SEGMENT';
-    row.appendChild(typeCell);
-    // URL
-    const urlCell = document.createElement('td');
-    urlCell.innerHTML = `<span class="segment-url">${data.url.split('/').pop()}</span>`;
-    row.appendChild(urlCell);
-    // Size
-    const sizeCell = document.createElement('td');
-    sizeCell.textContent = formatSize(data.size);
-    row.appendChild(sizeCell);
-    // Time
-    const timeCell = document.createElement('td');
-    timeCell.textContent = formatTime(data.timestamp);
-    row.appendChild(timeCell);
-    // Headers
-    const headersCell = document.createElement('td');
-    headersCell.appendChild(createHeaderButton(data.headers));
-    row.appendChild(headersCell);
-    return row;
+  // At the end of DOMContentLoaded, start the waiting timer
+  resetManifestWaitingTimer();
+
+  // --- ALARM SYSTEM ---
+  // Add alarm bell icon and sidebar
+  const alarmBell = document.createElement('div');
+  alarmBell.id = 'alarmBell';
+  alarmBell.style.position = 'fixed';
+  alarmBell.style.top = '18px';
+  alarmBell.style.right = '32px';
+  alarmBell.style.zIndex = '9999';
+  alarmBell.style.cursor = 'pointer';
+  alarmBell.innerHTML = '<i class="fas fa-bell"></i><span id="alarmCount" style="background:red;color:white;border-radius:50%;padding:2px 6px;font-size:0.8em;position:absolute;top:-8px;right:-8px;display:none;">0</span>';
+  document.body.appendChild(alarmBell);
+
+  const alarmSidebar = document.createElement('div');
+  alarmSidebar.id = 'alarmSidebar';
+  alarmSidebar.style.position = 'fixed';
+  alarmSidebar.style.top = '0';
+  alarmSidebar.style.right = '-400px';
+  alarmSidebar.style.width = '400px';
+  alarmSidebar.style.height = '100%';
+  alarmSidebar.style.background = '#222';
+  alarmSidebar.style.color = '#fff';
+  alarmSidebar.style.overflowY = 'auto';
+  alarmSidebar.style.transition = 'right 0.3s';
+  alarmSidebar.style.zIndex = '10000';
+  alarmSidebar.innerHTML = '<div style="padding:1em;font-size:1.2em;border-bottom:1px solid #444;display:flex;align-items:center;justify-content:space-between;"><span><i class="fas fa-bell"></i> Alarm History</span><button id="closeAlarmSidebar" style="background:none;border:none;color:#fff;font-size:1.2em;cursor:pointer;"><i class="fas fa-times"></i></button></div><div id="alarmHistory" style="padding:1em;"></div><div style="padding:1em;border-top:1px solid #444;"><label><input type="checkbox" id="alarmSoundToggle" checked> Sound Alerts</label></div>';
+  document.body.appendChild(alarmSidebar);
+
+  document.getElementById('closeAlarmSidebar').onclick = () => {
+    alarmSidebar.style.right = '-400px';
+  };
+  alarmBell.onclick = () => {
+    alarmSidebar.style.right = alarmSidebar.style.right === '0px' ? '-400px' : '0px';
+    document.getElementById('alarmCount').style.display = 'none';
+    unreadAlarmCount = 0;
+    updateAlarmCount();
+  };
+
+  let alarmHistory = [];
+  let unreadAlarmCount = 0;
+  let alarmSoundEnabled = true;
+  const alarmSound = new Audio('audio/alert.mp3');
+  document.getElementById('alarmSoundToggle').onchange = (e) => {
+    alarmSoundEnabled = e.target.checked;
+  };
+  function updateAlarmCount() {
+    const countSpan = document.getElementById('alarmCount');
+    if (unreadAlarmCount > 0) {
+      countSpan.textContent = unreadAlarmCount;
+      countSpan.style.display = 'inline-block';
+    } else {
+      countSpan.style.display = 'none';
+    }
   }
+  function showAlarmToast(alarm) {
+    const toast = document.createElement('div');
+    toast.className = 'alarm-toast';
+    toast.style.position = 'fixed';
+    toast.style.bottom = '32px';
+    toast.style.right = '32px';
+    toast.style.background = alarm.type === 'error' ? '#e74c3c' : '#f1c40f';
+    toast.style.color = '#fff';
+    toast.style.padding = '1em 1.5em';
+    toast.style.borderRadius = '8px';
+    toast.style.boxShadow = '0 2px 8px rgba(0,0,0,0.2)';
+    toast.style.zIndex = '10001';
+    toast.style.fontSize = '1em';
+    toast.style.display = 'flex';
+    toast.style.alignItems = 'center';
+    toast.innerHTML = `<span style="font-size:1.3em;margin-right:0.7em;">${alarm.type === 'error' ? '🔥' : '⚠️'}</span><b>${alarm.title}</b><span style="margin-left:1em;">${alarm.message}</span>`;
+    document.body.appendChild(toast);
+    setTimeout(() => toast.remove(), 4000); // 4 seconds
+  }
+  function addAlarmToSidebar(alarm) {
+    alarmHistory.unshift(alarm);
+    if (alarmHistory.length > 100) alarmHistory.pop();
+    const historyDiv = document.getElementById('alarmHistory');
+    historyDiv.innerHTML = alarmHistory.map(a =>
+      `<div style="margin-bottom:1em;padding:0.7em 0.5em;border-bottom:1px solid #444;cursor:pointer;" onclick="this.querySelector('.alarm-context').style.display = this.querySelector('.alarm-context').style.display === 'block' ? 'none' : 'block';">
+        <span style="font-size:1.1em;">${a.type === 'error' ? '🔴' : '⚠️'}</span>
+        <b>${a.title}</b>
+        <span style="color:#aaa;font-size:0.9em;margin-left:0.5em;">[${new Date(a.timestamp).toLocaleTimeString()}]</span>
+        <div style="margin-top:0.3em;">${a.message}</div>
+        <div class="alarm-context" style="display:none;margin-top:0.5em;background:#333;padding:0.5em;border-radius:4px;font-size:0.95em;white-space:pre-wrap;">${JSON.stringify(a.context, null, 2)}</div>
+      </div>`
+    ).join('');
+  }
+  socket.on('alarm', (alarm) => {
+    unreadAlarmCount++;
+    updateAlarmCount();
+    showAlarmToast(alarm);
+    addAlarmToSidebar(alarm);
+    if (alarmSoundEnabled) {
+      alarmSound.currentTime = 0;
+      alarmSound.play().catch(() => { });
+    }
+  });
 });

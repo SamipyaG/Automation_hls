@@ -1,6 +1,7 @@
 const axios = require('axios');
 const M3U8Parser = require('../utils/m3u8Parser');
 const { EventEmitter } = require('events');
+const crypto = require('crypto');
 
 class HLSMonitorService extends EventEmitter {
   constructor() {
@@ -151,6 +152,37 @@ class StreamMonitor extends EventEmitter {
         resolution: this.selectedProfile.resolution
       });
 
+      // Emit manifest-update immediately after profile selection
+      try {
+        const startTime = Date.now();
+        const response = await axios.get(this.currentProfileUrl, {
+          timeout: 10000,
+          maxRedirects: 5,
+          headers: { 'User-Agent': 'HLS-Analyzer/1.0' }
+        });
+        const fetchTime = Date.now() - startTime;
+        const requestUrl = response.request?.res?.responseUrl || this.currentProfileUrl;
+        const mediaPlaylist = M3U8Parser.parseMediaPlaylist(response.data);
+        const manifestEntry = {
+          url: this.currentProfileUrl,
+          requestUrl: requestUrl,
+          type: 'variant',
+          status: response.status,
+          size: response.headers['content-length'],
+          timing: fetchTime,
+          mediaSequence: mediaPlaylist.mediaSequence,
+          discontinuity: false,
+          headers: response.headers,
+          content: response.data,
+          timestamp: new Date().toISOString(),
+          id: Date.now() + Math.random(),
+          isNew: true
+        };
+        this.socket.emit('manifest-update', manifestEntry);
+      } catch (err) {
+        console.error('❌ Error emitting immediate manifest-update after profile selection:', err);
+      }
+
       // Start reactive monitoring of the selected profile
       this.lastMediaSequence = null;
       this.seenSegments = new Set();
@@ -167,7 +199,6 @@ class StreamMonitor extends EventEmitter {
   async reactiveManifestLoop() {
     while (this.isRunning) {
       try {
-        // Fetch the child manifest
         const startTime = Date.now();
         const response = await axios.get(this.currentProfileUrl, {
           timeout: 10000,
@@ -178,38 +209,41 @@ class StreamMonitor extends EventEmitter {
         const requestUrl = response.request?.res?.responseUrl || this.currentProfileUrl;
         const mediaPlaylist = M3U8Parser.parseMediaPlaylist(response.data);
         const newMediaSequence = mediaPlaylist.mediaSequence;
-
-        // Only emit manifest-update if media sequence changed
-        if (this.lastMediaSequence === null || newMediaSequence !== this.lastMediaSequence) {
-          this.lastMediaSequence = newMediaSequence;
-          // Emit only 1 new manifest row
-          const manifestEntry = {
-            url: this.currentProfileUrl,
-            requestUrl: requestUrl,
-            type: 'variant',
-            status: response.status,
-            size: response.headers['content-length'],
-            timing: fetchTime,
-            mediaSequence: newMediaSequence,
-            discontinuity: false,
-            headers: response.headers,
-            content: response.data,
-            timestamp: new Date().toISOString(),
-            id: Date.now() + Math.random(),
-            isNew: true
-          };
-          this.socket.emit('manifest-update', manifestEntry);
-        }
-
-        // Process segments reactively
+        const discontinuityCount = (response.data.match(/#EXT-X-DISCONTINUITY/g) || []).length;
+        const manifestHash = crypto.createHash('sha256').update(response.data).digest('hex');
+        // Log every fetch for debugging
+        console.log(`[POLL] Fetched mediaSequence: ${newMediaSequence}, hash: ${manifestHash}, time: ${new Date().toISOString()}`);
+        // Always emit manifest-update (real-time, every poll)
+        const manifestEntry = {
+          url: this.currentProfileUrl,
+          requestUrl: requestUrl,
+          type: 'variant',
+          status: response.status,
+          statusCode: response.status,
+          size: response.headers['content-length'],
+          timing: fetchTime,
+          downloadTime: fetchTime,
+          mediaSequence: newMediaSequence,
+          discontinuity: false,
+          discontinuityCount: discontinuityCount,
+          headers: response.headers,
+          content: response.data,
+          timestamp: new Date().toISOString(),
+          id: Date.now() + Math.random(),
+          isNew: true
+        };
+        this.socket.emit('manifest-update', manifestEntry);
+        this.lastMediaSequence = newMediaSequence;
+        this.lastManifestHash = manifestHash;
+        this.lastManifestTime = Date.now();
+        // Alarm check for manifest
+        const alarms = checkForAlarms(manifestEntry, { lastMediaSequence: this.lastMediaSequence, lastManifestTime: this.lastManifestTime });
+        if (alarms.length > 0) alarms.forEach(alarm => this.socket.emit('alarm', alarm));
         await this.reactiveSegmentCheck(mediaPlaylist, requestUrl);
-
-        // Immediately fetch again (no delay, no polling)
-        // If the playlist is unchanged, this will be a fast loop, but only emits on real change
+        // Immediately fetch again (no delay, no timer)
       } catch (error) {
         console.error('❌ Error in reactive manifest loop:', error);
         this.socket.emit('error', { message: error.message });
-        // Optional: add a short delay on error to avoid hammering
         await new Promise(resolve => setTimeout(resolve, 1000));
       }
     }
@@ -217,6 +251,7 @@ class StreamMonitor extends EventEmitter {
 
   // --- REACTIVE SEGMENT EMISSION ---
   async reactiveSegmentCheck(mediaPlaylist, requestUrl) {
+    let lastSegmentSequence = null;
     for (let i = 0; i < mediaPlaylist.segments.length; i++) {
       const segment = mediaPlaylist.segments[i];
       const segmentSequence = mediaPlaylist.mediaSequence + i;
@@ -243,11 +278,16 @@ class StreamMonitor extends EventEmitter {
             size: response.headers['content-length'],
             downloadTime: downloadTime,
             status: response.status,
+            statusCode: response.status,
             headers: response.headers,
-            timestamp: new Date().toISOString(),
+            timestamp: Date.now(),
             id: Date.now() + Math.random()
           };
           this.socket.emit('segment-update', segmentEntry);
+          // Alarm check for segment
+          const alarms = checkForAlarms(segmentEntry, { lastMediaSequence: lastSegmentSequence });
+          if (alarms.length > 0) alarms.forEach(alarm => this.socket.emit('alarm', alarm));
+          lastSegmentSequence = segmentSequence;
         } catch (err) {
           console.error('❌ Error fetching segment HEAD:', segmentUrl, err.message);
         }
@@ -354,6 +394,69 @@ class StreamMonitor extends EventEmitter {
       console.log(`⏭️ Skipping duplicate segment: #${segmentData.mediaSequence} - ${segmentData.url.split('/').pop()}`);
     }
   }
+}
+
+const ALARM_THRESHOLDS = {
+  segmentDownloadMs: 1000,
+  manifestDelayMs: 3000,
+};
+
+function checkForAlarms(data, context = {}) {
+  const alarms = [];
+  // HTTP error
+  if (data.statusCode && data.statusCode !== 200) {
+    alarms.push({
+      type: "error",
+      title: `HTTP Error ${data.statusCode}`,
+      message: `${data.url} failed with ${data.statusCode}`,
+      context: { ...data },
+      timestamp: new Date().toISOString()
+    });
+  }
+  // Missing content-length
+  if (!data.headers || !data.headers['content-length']) {
+    alarms.push({
+      type: "warning",
+      title: "Missing Content-Length",
+      message: `${data.url} missing content-length header`,
+      context: { ...data },
+      timestamp: new Date().toISOString()
+    });
+  }
+  // Slow download
+  if (data.downloadTime && data.downloadTime > ALARM_THRESHOLDS.segmentDownloadMs) {
+    alarms.push({
+      type: "warning",
+      title: `High Download Time (${data.downloadTime}ms)`,
+      message: `${data.url} took ${data.downloadTime}ms (expected <${ALARM_THRESHOLDS.segmentDownloadMs}ms)`,
+      context: { ...data },
+      timestamp: new Date().toISOString()
+    });
+  }
+  // Media sequence jump
+  if (context.lastMediaSequence !== undefined && data.mediaSequence !== undefined &&
+    data.mediaSequence - context.lastMediaSequence > 1) {
+    alarms.push({
+      type: "error",
+      title: "Media Sequence Jump",
+      message: `Jump from ${context.lastMediaSequence} → ${data.mediaSequence}`,
+      context: { ...data },
+      timestamp: new Date().toISOString()
+    });
+  }
+  // Manifest delay
+  if (context.lastManifestTime && data.timestamp && (data.timestamp - context.lastManifestTime > ALARM_THRESHOLDS.manifestDelayMs)) {
+    alarms.push({
+      type: "warning",
+      title: "Manifest Refresh Delay",
+      message: `Manifest update delayed by ${data.timestamp - context.lastManifestTime}ms`,
+      context: { ...data },
+      timestamp: new Date().toISOString()
+    });
+  }
+  // Discontinuity (optional, if you want to track unexpected ones)
+  // ... add logic as needed ...
+  return alarms;
 }
 
 // Export singleton instance

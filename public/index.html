@@ -65,11 +65,13 @@
                 <tr>
                   <th><i class="fas fa-tag"></i> Type</th>
                   <th><i class="fas fa-link"></i> URL</th>
-                  <th><i class="fas fa-weight-hanging"></i> Size</th>
-                  <th><i class="fas fa-clock"></i> Time</th>
                   <th><i class="fas fa-list-ol"></i> Media Seq</th>
                   <th><i class="fas fa-random"></i> DISCO</th>
+                  <th><i class="fas fa-weight-hanging"></i> Size</th>
+                  <th><i class="fas fa-clock"></i> Time</th>
                   <th><i class="fas fa-calendar"></i> Fetched At</th>
+                  <th><i class="fas fa-bolt"></i> Download Time (ms)</th>
+                  <th><i class="fas fa-signal"></i> Status Code</th>
                   <th><i class="fas fa-headers"></i> Headers</th>
                   <th><i class="fas fa-file-alt"></i> Content</th>
                 </tr>
@@ -91,6 +93,8 @@
                   <th><i class="fas fa-link"></i> URL</th>
                   <th><i class="fas fa-weight-hanging"></i> Size</th>
                   <th><i class="fas fa-clock"></i> Time</th>
+                  <th><i class="fas fa-bolt"></i> Download Time (ms)</th>
+                  <th><i class="fas fa-signal"></i> Status Code</th>
                   <th><i class="fas fa-headers"></i> Headers</th>
                 </tr>
               </thead>
@@ -105,7 +109,8 @@
       <div class="right-panel">
         <section>
           <h2><i class="fas fa-play-circle"></i> HLS Video Player</h2>
-          <video id="hls-video" controls width="400" style="background:#000"></video>
+          <div id="profileSelectorContainer"></div>
+          <video id="hls-video" controls width="700" style="background:#000;max-width:100%"></video>
         </section>
       </div>
     </div>
